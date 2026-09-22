@@ -76,7 +76,8 @@ static void test_sodium(void)
 
 static void test_materials(void)
 {
-    CHECK(rm_fuel_k(800.0) > 15.0 && rm_fuel_k(800.0) < 30.0, "fuel k range %g", rm_fuel_k(800.0));
+    CHECK(rm_fuel_k(1300.0) > 12.0 && rm_fuel_k(1300.0) < 20.0, "carbide k range %g", rm_fuel_k(1300.0));
+    CHECK(rm_gap_h(900.0) > 4000.0 && rm_gap_h(900.0) < 12000.0, "gap h %g", rm_gap_h(900.0));
     CHECK_REL(rm_graphite_cp(700.0), 1518.0, 2e-2, "graphite cp");
     double p = rm_zrh_ph2(1073.15, 1.6);
     CHECK(p > 2e4 && p < 2e5, "ZrH1.6 H2 pressure at 800C %g Pa", p);

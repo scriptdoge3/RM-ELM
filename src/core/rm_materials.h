@@ -1,7 +1,8 @@
 /*
  * Solid material properties for the core and structures. SI units, T in K.
  *
- *   U-10Zr   metallic fuel slug (Billone correlation, degraded for porosity)
+ *   (U,Th)C  carbide fuel pellets, 90% of theoretical density, helium bonded
+ *            (heavy metal 10 wt% U-235, 40 wt% U-238, 50 wt% Th-232)
  *   HT9      ferritic-martensitic cladding and ducts (Leibowitz & Blomquist)
  *   SS316    vessel, piping, heat exchanger tubes
  *   Graphite canned moderator blocks and reflector (Butland & Maddison cp)
@@ -10,14 +11,17 @@
 #ifndef RM_MATERIALS_H
 #define RM_MATERIALS_H
 
-#define RM_FUEL_SOLIDUS 1470.0     /* K, U-10Zr at moderate burnup */
-#define RM_FUEL_LIQUIDUS 1520.0
-#define RM_FCCI_ONSET 923.0        /* K, fuel/clad eutectic penetration becomes significant */
+#define RM_FUEL_SOLIDUS 2700.0     /* K, (U,Th)C solid solution */
+#define RM_FUEL_LIQUIDUS 2780.0
+#define RM_FUEL_DENSITY 10.8e3     /* kg/m3 at 90% TD (TD = 12.0 g/cc) */
+#define RM_CLAD_CARBURISATION 973.0 /* K, carbon transfer into HT9 becomes rapid */
 #define RM_HT9_MELT 1700.0
 #define RM_ZRH_X0 1.60             /* as-fabricated H/Zr ratio */
 
 double rm_fuel_k(double T);
 double rm_fuel_rhocp(double T);    /* J/m3/K */
+/* Helium bond gap conductance for a partly closed pellet-clad gap, W/m2/K. */
+double rm_gap_h(double T_gap);
 
 double rm_ht9_k(double T);
 double rm_ht9_rhocp(double T);

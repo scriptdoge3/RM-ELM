@@ -1,7 +1,7 @@
 /*
  * IAPWS-IF97 regions 1, 2 and 4, plus the IAPWS 2008/2011 transport
  * properties. Coefficients live in rm_if97_coeffs.h, generated from the
- * reference `iapws` Python package by tools/gen_if97_coeffs.py.
+ * reference `iapws` package.
  */
 #include "rm_if97.h"
 #include "rm_if97_coeffs.h"

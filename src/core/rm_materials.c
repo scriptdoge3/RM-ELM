@@ -4,20 +4,23 @@
 
 double rm_fuel_k(double T)
 {
-    /* Billone U-Pu-Zr correlation at w_Zr = 0.10, w_Pu = 0, times 0.75 for
-     * the porosity and sodium logging of fuel swollen out to the cladding. */
-    const double wz = 0.10;
-    double k = 17.5 * (1.0 - 2.23 * wz) / (1.0 + 1.61 * wz)
-             + 1.54e-2 * (1.0 + 0.061 * wz) / (1.0 + 1.61 * wz) * T
-             + 9.38e-6 * T * T;
-    return 0.75 * k;
+    /* (U0.5Th0.5)C: UC-like conductivity lowered by alloy scattering, then
+     * (1-p)/(1+2p) for 10% porosity. */
+    double k_td = 18.5 + 2.0e-3 * (T - 773.0);
+    return k_td * 0.9 / 1.2;
 }
 
 double rm_fuel_rhocp(double T)
 {
-    double cp = 140.0 + 0.05 * (T - 300.0);
-    if (T > RM_FUEL_SOLIDUS) cp = 140.0 + 0.05 * (RM_FUEL_SOLIDUS - 300.0);
-    return 15.8e3 * cp;
+    if (T > RM_FUEL_SOLIDUS) T = RM_FUEL_SOLIDUS;
+    return RM_FUEL_DENSITY * (200.0 + 0.045 * (T - 300.0));
+}
+
+double rm_gap_h(double T_gap)
+{
+    /* helium conduction across ~60 um effective gap plus solid contact */
+    double k_he = 2.639e-3 * pow(T_gap, 0.7085);
+    return k_he / 60e-6 + 1500.0;
 }
 
 double rm_ht9_k(double T)
