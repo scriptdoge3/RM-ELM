@@ -35,10 +35,15 @@
 #define RM_PITCH 16.0              /* cm */
 #define RM_P_RATED 2300.0e6        /* W thermal */
 #define RM_NDH 11                  /* decay heat groups */
+/* burnable absorber in fresh fuel: a thin enriched-B4C wire in the bundle
+ * (~0.2 cm2 per channel at the centre), homogenised B-10 density in
+ * atoms/b-cm, zoned from centre to edge to flatten the radial power */
+#define RM_BP_CENTRE 1.10e-4
+#define RM_BP_EDGE 0.80e-5
 
 enum { COL_FUEL, COL_CTRL, COL_REFL };
 enum { BANK_REG, BANK_SHIM_A, BANK_SHIM_B, BANK_SHIM_C, BANK_SHIM_D, BANK_SAFETY, RM_NBANKS };
-enum { ISO_I135, ISO_XE135, ISO_PM149, ISO_SM149, ISO_PA233, ISO_U233, ISO_U235, RM_NISO };
+enum { ISO_I135, ISO_XE135, ISO_PM149, ISO_SM149, ISO_PA233, ISO_U233, ISO_U235, ISO_B10, RM_NISO };
 
 typedef struct {
     rm_diff dif;

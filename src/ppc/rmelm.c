@@ -121,7 +121,7 @@ static void draw(rm_plant *p, const char *cmd)
     else printf("PERIOD   INFIN\033[K\n");
     printf("   FIRST OUT: %-28s DOPPLER %5.2f pcm/K  PEAKING %4.2f\033[K\n",
            p->first_out[0] ? p->first_out : "-", 1e5 * c->rho_doppler_coef, c->peak_factor);
-    printf("   RODS cm in:");
+    printf("   AUTO ROD %s  RODS cm in:", p->auto_rod ? "ON " : "off");
     for (int b = 0; b < RM_NBANKS; b++) printf(" %s %5.1f", bank_name[b], rm_core_bank_pos(c, b));
     printf("\033[K\n\033[K\n");
     printf(" CORE  FLOW %6.0f kg/s (%5.1f %%)  INLET %5.1f C  OUTLET %5.1f C  FUEL MAX %5.0f C  CLAD MAX %5.0f C\033[K\n",
@@ -168,7 +168,7 @@ static void help(rm_plant *p)
     rm_core *c = &p->core;
     logmsg(c, "ROD <REG|A|B|C|D|SAFE|ALL> <cm>  0=out 160=in    SCRAM   RESET");
     logmsg(c, "PUMP <P1-P4|S1-S4> <START|STOP|PONY|SPEED n>     TURB <TRIP|RESET>");
-    logmsg(c, "PSET <MPa>   FW <AUTO|MAN>   RPS <ON|BYPASS>   RUN <1-8>   QUIT");
+    logmsg(c, "AUTO <%%|OFF>  PSET <MPa>  FW <AUTO|MAN>  RPS <ON|BYPASS>  RUN <1-8>  QUIT");
 }
 
 static void command(rm_plant *p, char *line, int *quit)
@@ -194,6 +194,7 @@ static void command(rm_plant *p, char *line, int *quit)
         }
     } else if (!strcmp(a, "ROD") && n == 3) {
         if (c->scram) { logmsg(c, "ROD WITHDRAWAL BLOCKED: RPS TRIPPED"); return; }
+        if (p->auto_rod && !strcmp(b, "REG")) { logmsg(c, "REG BANK IS IN AUTO - USE AUTO OFF FIRST"); return; }
         double pos = atof(d);
         if (!strcmp(b, "ALL")) {
             for (int k = 0; k < RM_NBANKS; k++) rm_core_bank_move(c, k, pos);
@@ -233,6 +234,17 @@ static void command(rm_plant *p, char *line, int *quit)
     } else if (!strcmp(a, "FW") && n >= 2) {
         p->auto_fw = !strcmp(b, "AUTO");
         logmsg(c, "FEEDWATER CONTROL %s", p->auto_fw ? "AUTO" : "MANUAL (valves frozen)");
+    } else if (!strcmp(a, "AUTO") && n >= 2) {
+        if (!strcmp(b, "OFF")) {
+            p->auto_rod = 0;
+            logmsg(c, "AUTO ROD CONTROL OFF");
+        } else {
+            double v = atof(b);
+            if (v < 1 || v > 110) { logmsg(c, "AUTO <1-110 %%> OR AUTO OFF"); return; }
+            p->auto_rod = 1;
+            p->power_set = v / 100.0;
+            logmsg(c, "AUTO ROD CONTROL: REG BANK HOLDS %.0f %% POWER", v);
+        }
     } else if (!strcmp(a, "RPS") && n >= 2) {
         p->rps_bypass = !strcmp(b, "BYPASS");
         logmsg(c, p->rps_bypass ? "*** RPS BYPASSED - TRIPS DISABLED ***" : "RPS ARMED");

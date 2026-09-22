@@ -37,7 +37,7 @@ typedef struct {
 enum { RM_XS_REFL, RM_XS_AX_LOW, RM_XS_AX_UP, RM_XS_CR_ABS, RM_XS_CR_DISP, RM_XS_CR_NA, RM_XS_NFIXED };
 
 enum { RM_NUC_U235, RM_NUC_U238, RM_NUC_TH232, RM_NUC_U233, RM_NUC_PA233,
-       RM_NUC_XE135, RM_NUC_SM149, RM_NNUC };
+       RM_NUC_XE135, RM_NUC_SM149, RM_NUC_B10, RM_NNUC };
 
 typedef struct {
     double f[2], c[2], nf[2];   /* barns, per homogenised atom, relative to cell flux */

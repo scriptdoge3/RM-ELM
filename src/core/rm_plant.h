@@ -103,6 +103,8 @@ typedef struct {
     int auto_turbine;         /* turbine valve holds header pressure */
     double p_set, T_steam_set;
     double fw_int[RM_NLOOPS], tv_int;
+    int auto_rod;             /* regulating bank holds reactor power at power_set */
+    double power_set;         /* fraction of rated */
 
     /* reactor protection system */
     int rps_bypass;           /* 1 = trips disabled (for training/accident scenarios) */

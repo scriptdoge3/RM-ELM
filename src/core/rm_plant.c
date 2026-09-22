@@ -262,6 +262,8 @@ int rm_plant_init(rm_plant *p)
     p->turbine_valve = 0.9;
     p->generator_breaker = 1;
     p->auto_fw = p->auto_turbine = 1;
+    p->auto_rod = 1;
+    p->power_set = 1.0;
     p->p_set = P_STEAM0;
     p->T_steam_set = T_STEAM0;
     p->T_cw_in = 293.15;
@@ -459,6 +461,16 @@ void rm_plant_step(rm_plant *p, double dt)
         pump_step(&l->ppump, dt);
         pump_step(&l->spump, dt);
         l->Ws = W_S0 * fmax(l->spump.speed, 0.02);
+    }
+    /* automatic rod control: regulating bank drives against the power
+     * error with a 1% deadband, never while tripped */
+    rm_core *c = &p->core;
+    if (p->auto_rod && !c->scram) {
+        double err = c->p_thermal / RM_P_RATED - p->power_set;
+        double pos = rm_core_bank_pos(c, BANK_REG);
+        if (err > 0.005) rm_core_bank_move(c, BANK_REG, pos + 2.0);
+        else if (err < -0.005) rm_core_bank_move(c, BANK_REG, pos - 2.0);
+        else rm_core_bank_move(c, BANK_REG, pos);
     }
     hydraulics(p, dt);
     plant_thermal(p, dt, 1);

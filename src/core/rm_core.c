@@ -144,6 +144,15 @@ int rm_core_init(rm_core *c)
         c->iso[ISO_U235][n] = rm_xs_ref_density[RM_NUC_U235];
         c->zrh_x[n] = RM_ZRH_X0;
     }
+    /* radially zoned burnable absorber: most in the centre to flatten power */
+    for (int ch = 0; ch < c->nchan; ch++) {
+        double x, y;
+        rm_hexgrid_xy(g, c->col_of_chan[ch], 1.0, &x, &y);
+        double r = sqrt(x * x + y * y) / (RM_CORE_RINGS + 0.5);
+        if (r > 1) r = 1;
+        double nb = RM_BP_CENTRE + (RM_BP_EDGE - RM_BP_CENTRE) * r * r;
+        for (int k = 0; k < RM_NZ_ACT; k++) c->iso[ISO_B10][core_fnode(c, ch, k)] = nb;
+    }
     c->node_power = dal((size_t)c->dif.nn);
     c->phi_abs[0] = dal(nf);
     c->phi_abs[1] = dal(nf);
@@ -267,7 +276,8 @@ static void update_xs_offset(rm_core *c, double dTf)
                     rm_xs_fuel(&st, &x);
                     /* isotopic corrections relative to the fresh reference */
                     static const int nuc_of_iso[RM_NISO] = {-1, RM_NUC_XE135, -1, RM_NUC_SM149,
-                                                            RM_NUC_PA233, RM_NUC_U233, RM_NUC_U235};
+                                                            RM_NUC_PA233, RM_NUC_U233, RM_NUC_U235,
+                                                            RM_NUC_B10};
                     for (int i = 0; i < RM_NISO; i++) {
                         int nu = nuc_of_iso[i];
                         if (nu < 0) continue;
@@ -387,6 +397,8 @@ static void update_isotopes(rm_core *c, double dt)
             *U3 += L_PA233 * 0.5 * (Pa0 + *Pa) * dt;
         }
         *U5 *= exp(-su5 * dt);
+        const rm_micro2 *mb = rm_xs_micro(RM_NUC_B10);
+        c->iso[ISO_B10][n] *= exp(-(mb->c[0] * p1 + mb->c[1] * p2) * dt);
     }
 }
 

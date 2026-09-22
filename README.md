@@ -40,6 +40,7 @@ the steam plant and turbine-generator, a power trend and the message log.
 | Command | What it does |
 |---|---|
 | `ROD <bank> <cm>` | drive a bank to a depth: 0 = out, 160 = in. Banks: `REG A B C D SAFE ALL` |
+| `AUTO <%>` / `AUTO OFF` | automatic rod control: the REG bank holds reactor power at the setpoint (on at 100% by default) |
 | `SCRAM` / `RESET` | trip the reactor / reset the protection system (rods stay in) |
 | `PUMP P1..P4 START\|STOP\|PONY\|SPEED <%>` | primary pumps (`PONY` toggles the 10% pony motor) |
 | `PUMP S1..S4 START\|STOP\|SPEED <%>` | intermediate (secondary) sodium pumps |
