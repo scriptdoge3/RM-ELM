@@ -58,6 +58,11 @@ if(NOT MSVC)
   target_link_libraries(rmelm_core PUBLIC m)
 endif()
 
+if(NOT WIN32)
+  add_executable(rmelm src/ppc/rmelm.c)
+  target_link_libraries(rmelm PRIVATE rmelm_core)
+endif()
+
 if(RMELM_BUILD_TESTS)
   enable_testing()
   foreach(t test_props test_kernels test_diffusion test_core)
