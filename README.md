@@ -23,29 +23,43 @@ On x86-64 the assembly kernels are assembled automatically by the compiler;
 the program picks AVX or SSE2 at run time. On ARM or MSVC the C kernels are
 used. Force C with `-DRMELM_USE_ASM=OFF`.
 
-## Play (early version)
+## Play
 
 ```sh
 ./build/rmelm
 ```
 
-Linux, macOS or WSL terminal. It starts with the core at rated power, held
-critical by the shim banks. Only the reactor core exists so far: coolant flow
-and inlet temperature are set by hand until the sodium loops are added.
+Linux, macOS or WSL terminal. Start-up takes about 20 seconds while the
+whole plant converges to its rated-power heat balance: 2300 MWt, ~900 MWe net.
+
+The screen shows the reactor (power, reactivity, period, rod banks, RPS
+status and first-out trip), the core (flow, inlet/outlet, peak fuel and clad
+temperatures), all four loops (pumps, sodium temperatures, feedwater, steam),
+the steam plant and turbine-generator, a power trend and the message log.
 
 | Command | What it does |
 |---|---|
-| `ROD <bank> <cm>` | drive a bank to a depth: 0 = fully out, 160 = fully in. Banks: `REG A B C D SAFE ALL` |
-| `SCRAM` | manual reactor trip, all 55 rods drop |
-| `RESET` | reset a trip (rods stay in; drive them out yourself) |
-| `FLOW <%>` | primary sodium flow |
-| `TIN <C>` | core inlet sodium temperature |
+| `ROD <bank> <cm>` | drive a bank to a depth: 0 = out, 160 = in. Banks: `REG A B C D SAFE ALL` |
+| `SCRAM` / `RESET` | trip the reactor / reset the protection system (rods stay in) |
+| `PUMP P1..P4 START\|STOP\|PONY\|SPEED <%>` | primary pumps (`PONY` toggles the 10% pony motor) |
+| `PUMP S1..S4 START\|STOP\|SPEED <%>` | intermediate (secondary) sodium pumps |
+| `TURB TRIP\|RESET` | trip the turbine / reset and resynchronise |
+| `PSET <MPa>` | steam pressure setpoint (turbine valve holds it) |
+| `FW AUTO\|MAN` | feedwater control (auto holds 480 C steam) |
+| `RPS ON\|BYPASS` | arm or bypass the reactor protection system |
 | `RUN <1-8>` | simulation speed |
 | `HELP`, `QUIT` | |
 
-Automatic trips: power above 118%, reactor period shorter than 8 s,
-cladding above 700 C, power/flow mismatch.
+Automatic reactor trips: power 115%, period 10 s, power/flow 1.15, primary
+flow below 70%, two primary pumps off, core outlet 600 C, clad 700 C, steam
+pressure 16.5 MPa, turbine trip above 50% power. A reactor trip trips the
+turbine.
 
-Things to try: withdraw `REG` a few cm and watch power and fuel temperature
-rise until Doppler feedback levels it off; cut `FLOW` and see the trip; SCRAM
-and watch decay heat take over from fission power.
+Things to try:
+
+- Stop one primary pump: the other three pick up, outlet temperature rises.
+- Stop two: the RPS trips the reactor; pony motors keep ~10% flow.
+- `TURB TRIP` at full power and watch the bypass and safety valves.
+- `RPS BYPASS`, then stop all four pumps: the unprotected loss-of-flow
+  accident. This core is not passively safe - watch the clad temperature.
+- After a SCRAM, `RESET` and restart the reactor by pulling the shim banks.

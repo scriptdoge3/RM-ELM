@@ -104,14 +104,24 @@ typedef struct {
     double p_set, T_steam_set;
     double fw_int[RM_NLOOPS], tv_int;
 
+    /* reactor protection system */
+    int rps_bypass;           /* 1 = trips disabled (for training/accident scenarios) */
+    char first_out[48];       /* first trip signal to actuate */
+    double period;            /* reactor period estimate, s */
+    double n_last;
+
     double t;
 } rm_plant;
+
+/* Nominal values used by displays and protection. */
+double rm_plant_nominal_flow(void);   /* total primary, kg/s */
 
 int rm_plant_init(rm_plant *p);
 void rm_plant_free(rm_plant *p);
 /* Converge the whole plant to steady full power. */
 void rm_plant_steady(rm_plant *p);
 void rm_plant_step(rm_plant *p, double dt);
+void rm_plant_manual_scram(rm_plant *p);
 
 double rm_na_T_of_h(double h);
 

@@ -267,6 +267,7 @@ int rm_plant_init(rm_plant *p)
     p->T_cw_in = 293.15;
     p->T_fw = T_FW0;
     p->p_cond = 6.0e3;
+    p->period = INFINITY;
     return 0;
 }
 
@@ -415,6 +416,42 @@ static void plant_thermal(rm_plant *p, double dt, int with_neutronics)
     if (wsum > 1e-9) p->h_inplenum = (Mi / dt * p->h_inplenum + wsum * hcold_mix / wsum) / (Mi / dt + wsum);
 }
 
+double rm_plant_nominal_flow(void) { return W_P0 * RM_NLOOPS; }
+
+static void trip(rm_plant *p, const char *why)
+{
+    rm_core *c = &p->core;
+    if (c->scram) return;
+    rm_core_scram(c);
+    strncpy(p->first_out, why, sizeof p->first_out - 1);
+    p->first_out[sizeof p->first_out - 1] = 0;
+    /* reactor trip -> turbine trip */
+    p->turbine_tripped = 1;
+    p->generator_breaker = 0;
+}
+
+void rm_plant_manual_scram(rm_plant *p) { trip(p, "MANUAL SCRAM"); }
+
+static void protection(rm_plant *p)
+{
+    rm_core *c = &p->core;
+    double pw = c->p_thermal / RM_P_RATED;
+    double flow = p->W_core / (W_P0 * RM_NLOOPS);
+    int pumps_off = 0;
+    for (int i = 0; i < RM_NLOOPS; i++)
+        if (p->loop[i].ppump.tripped || !p->loop[i].ppump.motor_on) pumps_off++;
+    if (p->rps_bypass || c->scram) return;
+    if (pw > 1.15) trip(p, "HIGH POWER 115%");
+    else if (p->period > 0 && p->period < 10.0 && c->pks.n > 1e-4) trip(p, "SHORT PERIOD 10 S");
+    else if (pw > 0.15 && pw / fmax(flow, 0.01) > 1.15) trip(p, "POWER/FLOW 1.15");
+    else if (pw > 0.10 && flow < 0.70) trip(p, "LOW PRIMARY FLOW 70%");
+    else if (pumps_off >= 2 && pw > 0.05) trip(p, "PRIMARY PUMP TRIP (2/4)");
+    else if (p->T_core_out > 873.15) trip(p, "HIGH CORE OUTLET 600 C");
+    else if (rm_core_max_clad_T(c) > 973.15) trip(p, "HIGH CLAD TEMP 700 C");
+    else if (p->p_header > 16.5e6) trip(p, "HIGH STEAM PRESSURE");
+    else if (p->turbine_tripped && pw > 0.50) trip(p, "TURBINE TRIP > 50% POWER");
+}
+
 void rm_plant_step(rm_plant *p, double dt)
 {
     for (int i = 0; i < RM_NLOOPS; i++) {
@@ -426,6 +463,15 @@ void rm_plant_step(rm_plant *p, double dt)
     hydraulics(p, dt);
     plant_thermal(p, dt, 1);
     steam_side(p, dt);
+    /* period from the neutron level */
+    double n = p->core.pks.n;
+    if (p->n_last > 0 && n > 0) {
+        double inst = dt / log(n / p->n_last);
+        if (!isfinite(p->period)) p->period = inst;
+        else p->period = 1.0 / (0.9 / p->period + 0.1 / inst);
+    }
+    p->n_last = n;
+    protection(p);
     p->t += dt;
 }
 

@@ -3,14 +3,16 @@
  *
  * Amber-phosphor style full-screen display of the reactor core with a
  * command prompt. The core runs in real time (or faster with RUN n).
- * Only the core exists so far: coolant flow and inlet temperature are
- * set directly by the operator until the sodium loops are built.
+ * The whole plant runs: core, four sodium loops, steam generators and the
+ * turbine, with the reactor protection system armed.
  *
  * POSIX terminals only for now (Linux, macOS, WSL).
  */
 #define _POSIX_C_SOURCE 200809L
-#include "rm_core.h"
+#include "rm_if97.h"
 #include "rm_kernels.h"
+#include "rm_plant.h"
+#include "rm_sodium.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -74,14 +76,10 @@ static void logmsg(const rm_core *c, const char *fmt, ...)
     snprintf(logbuf[NLOG - 1], sizeof logbuf[0], "%02d:%02d:%02d %s", t / 3600, t / 60 % 60, t % 60, msg);
 }
 
-/* ---- plant state the operator sets directly (until loops exist) ---- */
-static double flow_pct = 100.0, tin_c = 380.0;
-static double w_nom[1024], wb_nom[1024];
 static int speed = 1;
 static double trend[64];
 static int ntrend = 0;
-static double period = INFINITY, n_prev = 0;
-static int tripped_logged = 0;
+static char last_first_out[48] = "";
 
 static const char *bank_name[RM_NBANKS] = {"REG", "A", "B", "C", "D", "SAFE"};
 
@@ -93,29 +91,7 @@ static int bank_of(const char *s)
     return -1;
 }
 
-static void apply_plant(rm_core *c)
-{
-    for (int ch = 0; ch < c->nchan; ch++) {
-        c->th.W[ch] = w_nom[ch] * flow_pct / 100.0;
-        c->th.W_byp[ch] = wb_nom[ch] * flow_pct / 100.0;
-        c->th.T_in[ch] = tin_c + 273.15;
-    }
-}
-
-static void protection(rm_core *c)
-{
-    const char *why = NULL;
-    if (c->p_thermal > 1.18 * RM_P_RATED) why = "HIGH NEUTRON POWER 118%";
-    else if (period > 0 && period < 8.0 && c->pks.n > 1e-4) why = "SHORT PERIOD < 8 S";
-    else if (rm_core_max_clad_T(c) > 973.0) why = "HIGH CLAD TEMPERATURE 700 C";
-    else if (c->p_thermal > 0.2 * RM_P_RATED && flow_pct < 0.8 * 100.0 * c->p_thermal / RM_P_RATED)
-        why = "POWER/FLOW MISMATCH";
-    if (why && !c->scram) {
-        rm_core_scram(c);
-        logmsg(c, "*** REACTOR TRIP: %s ***", why);
-        tripped_logged = 1;
-    }
-}
+static double C(double K) { return K - 273.15; }
 
 static void bar(double frac, int w)
 {
@@ -125,96 +101,101 @@ static void bar(double frac, int w)
     for (int i = 0; i < w; i++) fputs(i < n ? "\xe2\x96\x88" : DIM "\xc2\xb7" AMBER, stdout);
 }
 
-static void draw(rm_core *c, const char *cmd)
+static void draw(rm_plant *p, const char *cmd)
 {
-    int t = (int)c->t;
+    rm_core *c = &p->core;
+    int t = (int)p->t;
     double pct = 100.0 * c->p_thermal / RM_P_RATED;
-    double rho = c->rho, beta = 0;
+    double beta = 0;
     for (int i = 0; i < 6; i++) beta += c->pk.beta[i];
-    double tout = 0, tmax = 0;
-    for (int ch = 0; ch < c->nchan; ch++) {
-        tout += c->th.T_mixed_out[ch];
-        if (c->th.T_mixed_out[ch] > tmax) tmax = c->th.T_mixed_out[ch];
-    }
-    tout /= c->nchan;
 
     printf("\033[H" AMBER);
-    printf(INV " RM-ELM UNIT 1  PLANT PROCESS COMPUTER            T+%02d:%02d:%02d   SPEED x%-2d " RST AMBER "\033[K\n",
+    printf(INV " RM-ELM UNIT 1   PLANT PROCESS COMPUTER               T+%02d:%02d:%02d   SPEED x%-2d " RST AMBER "\033[K\n",
            t / 3600, t / 60 % 60, t % 60, speed);
-    printf("\033[K\n");
-    printf(" REACTOR THERMAL POWER  " BRIGHT "%8.1f MWt  %6.2f %%" AMBER "   ", c->p_thermal / 1e6, pct);
-    bar(pct / 120.0, 22);
-    printf("\033[K\n");
-    printf("   FISSION %8.1f MW   DECAY HEAT %6.1f MW   NEUTRON LEVEL %9.3e\033[K\n",
-           c->p_fission / 1e6, c->p_decay / 1e6, c->pks.n);
-    if (isfinite(period) && fabs(period) < 1e4)
-        printf("   REACTIVITY %+8.1f pcm  (%+6.3f $)   PERIOD %+8.1f s\033[K\n", 1e5 * rho, rho / beta, period);
-    else
-        printf("   REACTIVITY %+8.1f pcm  (%+6.3f $)   PERIOD   INFINITE\033[K\n", 1e5 * rho, rho / beta);
-    printf("   DOPPLER COEF %6.2f pcm/K   PEAKING %5.2f   KINETICS %s\033[K\n",
-           1e5 * c->rho_doppler_coef, c->peak_factor, rm_kernels_backend_name());
-    printf("\033[K\n");
-    printf(" PRIMARY SODIUM  FLOW %5.1f %%   INLET %6.1f C   OUTLET MEAN %6.1f C   MAX %6.1f C\033[K\n",
-           flow_pct, tin_c, tout - 273.15, tmax - 273.15);
-    printf(" FUEL  MEAN %6.0f C   CENTRELINE MAX %6.0f C      CLAD MAX %6.0f C\033[K\n",
-           rm_core_mean_fuel_T(c) - 273.15, rm_core_max_fuel_T(c) - 273.15, rm_core_max_clad_T(c) - 273.15);
-    printf("\033[K\n");
-    printf(" CONTROL RODS (cm inserted of 160)     SCRAM: %s\033[K\n", c->scram ? BRIGHT INV " TRIPPED " RST AMBER : "no");
-    printf("  ");
-    for (int b = 0; b < RM_NBANKS; b++) printf(" %-4s %5.1f  ", bank_name[b], rm_core_bank_pos(c, b));
+    printf(" REACTOR POWER " BRIGHT "%7.1f MWt %6.2f %%" AMBER "  ", c->p_thermal / 1e6, pct);
+    bar(pct / 120.0, 20);
+    printf("   RPS: %s\033[K\n", c->scram ? BRIGHT INV " TRIPPED " RST AMBER : (p->rps_bypass ? "BYPASSED" : "armed"));
+    printf("   FISSION %7.1f MW  DECAY %6.1f MW  REACTIVITY %+7.1f pcm (%+6.3f $)  ",
+           c->p_fission / 1e6, c->p_decay / 1e6, 1e5 * c->rho, c->rho / beta);
+    if (isfinite(p->period) && fabs(p->period) < 1e4) printf("PERIOD %+7.1f s\033[K\n", p->period);
+    else printf("PERIOD   INFIN\033[K\n");
+    printf("   FIRST OUT: %-28s DOPPLER %5.2f pcm/K  PEAKING %4.2f\033[K\n",
+           p->first_out[0] ? p->first_out : "-", 1e5 * c->rho_doppler_coef, c->peak_factor);
+    printf("   RODS cm in:");
+    for (int b = 0; b < RM_NBANKS; b++) printf(" %s %5.1f", bank_name[b], rm_core_bank_pos(c, b));
     printf("\033[K\n\033[K\n");
-    /* power trend */
-    printf(" POWER TREND (last %d s, 0-120%%)\033[K\n", ntrend);
+    printf(" CORE  FLOW %6.0f kg/s (%5.1f %%)  INLET %5.1f C  OUTLET %5.1f C  FUEL MAX %5.0f C  CLAD MAX %5.0f C\033[K\n",
+           p->W_core, 100.0 * p->W_core / rm_plant_nominal_flow(), C(p->T_core_in), C(p->T_core_out),
+           C(rm_core_max_fuel_T(c)), C(rm_core_max_clad_T(c)));
+    printf("\033[K\n");
+    printf(DIM " LOOP  PRI PUMP   PRI FLOW  HOT LEG COLD LEG   SEC PUMP  SEC HOT SEC COLD   FW kg/s  STEAM C  SG MW" AMBER "\033[K\n");
+    for (int i = 0; i < RM_NLOOPS; i++) {
+        rm_loop *l = &p->loop[i];
+        const char *ps = l->ppump.tripped ? "TRIP" : (l->ppump.motor_on ? "RUN " : (l->ppump.pony_on ? "PONY" : "OFF "));
+        const char *ss = l->spump.tripped ? "TRIP" : (l->spump.motor_on ? "RUN " : "OFF ");
+        printf("  %d    %s %3.0f%%  %6.0f   %6.1f   %6.1f    %s %3.0f%%  %6.1f   %6.1f   %7.1f  %6.1f %6.1f\033[K\n",
+               i + 1, ps, 100 * l->ppump.speed, l->W, C(rm_na_T(l->hot.h[RM_PIPE_N - 1])),
+               C(rm_na_T(l->cold.h[RM_PIPE_N - 1])), ss, 100 * l->spump.speed,
+               C(rm_na_T(l->shot.h[RM_PIPE_N - 1])), C(rm_na_T(l->scold.h[RM_PIPE_N - 1])),
+               l->sg.W_fw, C(l->sg.T_steam), l->sg.Q / 1e6);
+    }
+    printf("\033[K\n");
+    printf(" STEAM %5.2f MPa  TURBINE %s VALVE %3.0f%%  BYPASS %3.0f%%  RELIEF %s  COND %4.1f kPa  FW %5.1f C\033[K\n",
+           p->p_header / 1e6, p->turbine_tripped ? "TRIPPED" : "online ", 100 * p->turbine_valve,
+           100 * p->bypass_valve, p->W_relief > 0 ? "OPEN" : "shut", p->p_cond / 1e3, C(p->T_fw));
+    printf(" GENERATOR " BRIGHT "%6.1f MWe" AMBER " gross   HOUSE LOAD %5.1f MW   NET " BRIGHT "%6.1f MWe" AMBER "   BREAKER %s\033[K\n",
+           p->P_gen / 1e6, p->P_house / 1e6, p->P_net / 1e6, p->generator_breaker ? "CLOSED" : "OPEN");
+    printf("\033[K\n");
+    printf(" POWER TREND (%d s)  ", ntrend);
     static const char *blk[] = {" ", "\xe2\x96\x81", "\xe2\x96\x82", "\xe2\x96\x83", "\xe2\x96\x84",
                                 "\xe2\x96\x85", "\xe2\x96\x86", "\xe2\x96\x87", "\xe2\x96\x88"};
-    printf("  ");
     for (int i = 0; i < 64; i++) {
         if (i < 64 - ntrend) { printf(" "); continue; }
-        double v = trend[i] / 120.0;
-        int k = (int)(v * 8 + 0.5);
+        int k = (int)(trend[i] / 120.0 * 8 + 0.5);
         if (k < 0) k = 0;
         if (k > 8) k = 8;
         printf("%s", blk[k]);
     }
-    printf("\033[K\n\033[K\n");
-    printf(" MESSAGES\033[K\n");
+    printf("\033[K\n\033[K\n MESSAGES\033[K\n");
     for (int i = 0; i < NLOG; i++) printf("  %s\033[K\n", logbuf[i]);
-    printf("\033[K\n");
     printf(" > %s" BRIGHT "_" AMBER "\033[K\n", cmd);
     printf(DIM " HELP for commands" AMBER "\033[K");
     fflush(stdout);
 }
 
-static void help(rm_core *c)
+static void help(rm_plant *p)
 {
-    logmsg(c, "ROD <REG|A|B|C|D|SAFE|ALL> <cm>   drive bank to depth (0=out 160=in)");
-    logmsg(c, "SCRAM   RESET   FLOW <%%>   TIN <degC>   RUN <1-8>   QUIT");
+    rm_core *c = &p->core;
+    logmsg(c, "ROD <REG|A|B|C|D|SAFE|ALL> <cm>  0=out 160=in    SCRAM   RESET");
+    logmsg(c, "PUMP <P1-P4|S1-S4> <START|STOP|PONY|SPEED n>     TURB <TRIP|RESET>");
+    logmsg(c, "PSET <MPa>   FW <AUTO|MAN>   RPS <ON|BYPASS>   RUN <1-8>   QUIT");
 }
 
-static void command(rm_core *c, char *line, int *quit)
+static void command(rm_plant *p, char *line, int *quit)
 {
-    char a[32] = "", b[32] = "", d[32] = "";
-    int n = sscanf(line, "%31s %31s %31s", a, b, d);
+    rm_core *c = &p->core;
+    char a[32] = "", b[32] = "", d[32] = "", e[32] = "";
+    int n = sscanf(line, "%31s %31s %31s %31s", a, b, d, e);
     if (n <= 0) return;
-    for (char *p = a; *p; p++) *p = (char)toupper((unsigned char)*p);
     if (!strcmp(a, "QUIT") || !strcmp(a, "EXIT")) {
         *quit = 1;
     } else if (!strcmp(a, "HELP")) {
-        help(c);
+        help(p);
     } else if (!strcmp(a, "SCRAM")) {
-        rm_core_scram(c);
+        rm_plant_manual_scram(p);
         logmsg(c, "*** MANUAL SCRAM ***");
     } else if (!strcmp(a, "RESET")) {
         if (!c->scram) logmsg(c, "NO TRIP TO RESET");
         else {
             rm_core_reset_scram(c);
-            tripped_logged = 0;
-            logmsg(c, "TRIP RESET - RODS REMAIN INSERTED");
+            p->first_out[0] = 0;
+            last_first_out[0] = 0;
+            logmsg(c, "RPS RESET - RODS REMAIN INSERTED");
         }
     } else if (!strcmp(a, "ROD") && n == 3) {
-        if (c->scram) { logmsg(c, "ROD MOTION BLOCKED: TRIP NOT RESET"); return; }
+        if (c->scram) { logmsg(c, "ROD WITHDRAWAL BLOCKED: RPS TRIPPED"); return; }
         double pos = atof(d);
-        if (!strcasecmp(b, "ALL")) {
+        if (!strcmp(b, "ALL")) {
             for (int k = 0; k < RM_NBANKS; k++) rm_core_bank_move(c, k, pos);
             logmsg(c, "ALL BANKS -> %.1f cm", pos);
         } else {
@@ -223,24 +204,42 @@ static void command(rm_core *c, char *line, int *quit)
             rm_core_bank_move(c, bk, pos);
             logmsg(c, "BANK %s -> %.1f cm (%.1f cm/s)", bank_name[bk], pos, c->bank_speed[bk]);
         }
-    } else if (!strcmp(a, "FLOW") && n >= 2) {
-        double f = atof(b);
-        if (f < 5) f = 5;
-        if (f > 110) f = 110;
-        flow_pct = f;
-        logmsg(c, "PRIMARY FLOW SET %.1f %%", f);
-    } else if (!strcmp(a, "TIN") && n >= 2) {
-        double t = atof(b);
-        if (t < 200) t = 200;
-        if (t > 500) t = 500;
-        tin_c = t;
-        logmsg(c, "CORE INLET TEMPERATURE SET %.1f C", t);
+    } else if (!strcmp(a, "PUMP") && n >= 3) {
+        int idx = atoi(b + 1) - 1;
+        if ((b[0] != 'P' && b[0] != 'S') || idx < 0 || idx >= RM_NLOOPS) { logmsg(c, "PUMP P1-P4 OR S1-S4"); return; }
+        rm_pump *pp = b[0] == 'P' ? &p->loop[idx].ppump : &p->loop[idx].spump;
+        if (!strcmp(d, "START")) { pp->tripped = 0; pp->motor_on = 1; if (pp->speed_set < 0.2) pp->speed_set = 1.0; }
+        else if (!strcmp(d, "STOP")) { pp->motor_on = 0; }
+        else if (!strcmp(d, "PONY")) { pp->pony_on = !pp->pony_on; }
+        else if (!strcmp(d, "SPEED") && n == 4) {
+            double v = atof(e) / 100.0;
+            pp->speed_set = v < 0.1 ? 0.1 : (v > 1.05 ? 1.05 : v);
+        } else { logmsg(c, "?PUMP %s", d); return; }
+        logmsg(c, "PUMP %s: %s%s", b, d, !strcmp(d, "PONY") ? (pp->pony_on ? " ON" : " OFF") : "");
+    } else if (!strcmp(a, "TURB") && n >= 2) {
+        if (!strcmp(b, "TRIP")) { p->turbine_tripped = 1; p->generator_breaker = 0; logmsg(c, "TURBINE MANUALLY TRIPPED"); }
+        else if (!strcmp(b, "RESET")) {
+            p->turbine_tripped = 0;
+            p->generator_breaker = 1;
+            p->tv_int = -2.0;
+            logmsg(c, "TURBINE RESET, GENERATOR SYNCHRONISED");
+        } else logmsg(c, "?TURB %s", b);
+    } else if (!strcmp(a, "PSET") && n >= 2) {
+        double v = atof(b);
+        if (v < 8) v = 8;
+        if (v > 15.5) v = 15.5;
+        p->p_set = v * 1e6;
+        logmsg(c, "STEAM PRESSURE SETPOINT %.2f MPa", v);
+    } else if (!strcmp(a, "FW") && n >= 2) {
+        p->auto_fw = !strcmp(b, "AUTO");
+        logmsg(c, "FEEDWATER CONTROL %s", p->auto_fw ? "AUTO" : "MANUAL (valves frozen)");
+    } else if (!strcmp(a, "RPS") && n >= 2) {
+        p->rps_bypass = !strcmp(b, "BYPASS");
+        logmsg(c, p->rps_bypass ? "*** RPS BYPASSED - TRIPS DISABLED ***" : "RPS ARMED");
     } else if (!strcmp(a, "RUN") && n >= 2) {
-        int s = atoi(b);
-        if (s < 1) s = 1;
-        if (s > 8) s = 8;
-        speed = s;
-        logmsg(c, "SIMULATION SPEED x%d", s);
+        int sp = atoi(b);
+        speed = sp < 1 ? 1 : (sp > 8 ? 8 : sp);
+        logmsg(c, "SIMULATION SPEED x%d", speed);
     } else {
         logmsg(c, "?SYNTAX: %s", line);
     }
@@ -252,30 +251,27 @@ int main(void)
         fprintf(stderr, "rmelm needs an interactive terminal\n");
         return 1;
     }
-    rm_core *c = malloc(sizeof *c);
-    printf(AMBER "RM-ELM PLANT PROCESS COMPUTER\nLOADING CORE MODEL AND CONVERGING FULL-POWER STATE ...\n" RST);
+    rm_plant *p = malloc(sizeof *p);
+    printf(AMBER "RM-ELM PLANT PROCESS COMPUTER\n"
+           "LOADING CORE MODEL, SODIUM LOOPS AND STEAM PLANT\n"
+           "CONVERGING RATED-POWER HEAT BALANCE (ABOUT 20 S) ...\n" RST);
     fflush(stdout);
-    rm_core_init(c);
-    rm_core_steady(c, 1.0, 1, 1);
-    for (int ch = 0; ch < c->nchan && ch < 1024; ch++) {
-        w_nom[ch] = c->th.W[ch];
-        wb_nom[ch] = c->th.W_byp[ch];
-    }
-    logmsg(c, "CORE AT RATED POWER, SHIM BANKS HOLDING CRITICALITY");
+    rm_plant_init(p);
+    rm_plant_steady(p);
+    rm_core *c = &p->core;
+    logmsg(c, "UNIT AT RATED POWER, TURBINE ON LINE");
     logmsg(c, "TYPE HELP FOR COMMANDS");
 
     raw_term();
     char cmd[80] = "";
     int len = 0, quit = 0;
-    double next = now(), last_draw = 0, last_trend = 0;
-    n_prev = c->pks.n;
+    double next = now(), last_draw = 0, last_trend = -1;
     while (!quit) {
-        /* keyboard */
         char ch;
         while (read(STDIN_FILENO, &ch, 1) == 1) {
             if (ch == '\n' || ch == '\r') {
                 cmd[len] = 0;
-                command(c, cmd, &quit);
+                command(p, cmd, &quit);
                 len = 0;
                 cmd[0] = 0;
             } else if (ch == 127 || ch == 8) {
@@ -287,32 +283,29 @@ int main(void)
                 cmd[len] = 0;
             }
         }
-        /* simulation */
         double tnow = now();
         int steps = 0;
         while (tnow >= next && steps < 8 * speed) {
-            for (int s = 0; s < speed; s++) {
-                apply_plant(c);
-                double n0 = c->pks.n;
-                rm_core_step(c, DT);
-                if (n0 > 0 && c->pks.n > 0) {
-                    double inst = DT / log(c->pks.n / n0);
-                    period = 1.0 / (0.9 / period + 0.1 / inst);
-                }
-                protection(c);
+            for (int s2 = 0; s2 < speed; s2++) {
+                rm_plant_step(p, DT);
                 steps++;
             }
             next += DT;
         }
-        if (tnow - next > 1.0) next = tnow; /* can't keep up: don't spiral */
-        if (c->t - last_trend >= 1.0) {
+        if (tnow - next > 1.0) next = tnow;
+        if (p->first_out[0] && strcmp(p->first_out, last_first_out)) {
+            strcpy(last_first_out, p->first_out);
+            if (strcmp(p->first_out, "MANUAL SCRAM"))
+                logmsg(c, "*** REACTOR TRIP  FIRST OUT: %s ***", p->first_out);
+        }
+        if (p->t - last_trend >= 1.0) {
             memmove(trend, trend + 1, sizeof(double) * 63);
             trend[63] = 100.0 * c->p_thermal / RM_P_RATED;
             if (ntrend < 64) ntrend++;
-            last_trend = c->t;
+            last_trend = p->t;
         }
         if (tnow - last_draw > 0.25) {
-            draw(c, cmd);
+            draw(p, cmd);
             last_draw = tnow;
         }
         fd_set fs;
@@ -321,7 +314,7 @@ int main(void)
         struct timeval tv = {0, 10000};
         select(STDIN_FILENO + 1, &fs, NULL, NULL, &tv);
     }
-    rm_core_free(c);
-    free(c);
+    rm_plant_free(p);
+    free(p);
     return 0;
 }

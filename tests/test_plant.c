@@ -62,6 +62,7 @@ int main(void)
     printf("\nunprotected loss of flow (all primary pumps trip, NO scram):\n");
     rm_plant_init(p);
     rm_plant_steady(p);
+    p->rps_bypass = 1;
     for (int i = 0; i < RM_NLOOPS; i++) p->loop[i].ppump.tripped = 1, p->loop[i].ppump.pony_on = 0;
     double peak_clad = 0;
     for (int i = 0; i <= 3000; i++) {
@@ -72,6 +73,22 @@ int main(void)
     }
     printf("  peak clad %.0f C, final power %.1f %%, natural circulation %.1f %% flow\n", peak_clad - 273.15,
            100 * p->core.p_thermal / RM_P_RATED, 100 * p->W_core / (4 * 2830.0));
+    rm_plant_free(p);
+
+    printf("\nprotected loss of flow (pumps trip, pony motors on, protection active):\n");
+    rm_plant_init(p);
+    rm_plant_steady(p);
+    for (int i = 0; i < RM_NLOOPS; i++) p->loop[i].ppump.tripped = 1;
+    peak_clad = 0;
+    for (int i = 0; i <= 3000; i++) {
+        if (i % 600 == 0) show(p);
+        rm_plant_step(p, 0.05);
+        double cm = rm_core_max_clad_T(&p->core);
+        if (cm > peak_clad) peak_clad = cm;
+    }
+    printf("  first out: %s, peak clad %.0f C\n", p->first_out, peak_clad - 273.15);
+    CHECK(p->core.scram, "protection tripped the reactor");
+    CHECK(peak_clad < 973.15, "clad stayed below 700 C (%.0f C)", peak_clad - 273.15);
     rm_plant_free(p);
     free(p);
     (void)fresh;
