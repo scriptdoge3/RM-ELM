@@ -36,6 +36,10 @@ set(RMELM_CORE_SOURCES
   src/core/rm_kernels.c
   src/core/rm_hexgrid.c
   src/core/rm_diffusion.c
+  src/core/rm_coreth.c
+  src/core/rm_xs.c
+  src/core/rm_xsdata.c
+  src/core/rm_core.c
 )
 
 if(RMELM_ASM_ACTIVE)
@@ -56,7 +60,7 @@ endif()
 
 if(RMELM_BUILD_TESTS)
   enable_testing()
-  foreach(t test_props test_kernels test_diffusion)
+  foreach(t test_props test_kernels test_diffusion test_core)
     add_executable(${t} tests/${t}.c)
     target_link_libraries(${t} PRIVATE rmelm_core)
     add_test(NAME ${t} COMMAND ${t})
