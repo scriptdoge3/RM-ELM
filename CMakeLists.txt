@@ -34,6 +34,8 @@ set(RMELM_CORE_SOURCES
   src/core/rm_sodium.c
   src/core/rm_materials.c
   src/core/rm_kernels.c
+  src/core/rm_hexgrid.c
+  src/core/rm_diffusion.c
 )
 
 if(RMELM_ASM_ACTIVE)
@@ -54,7 +56,7 @@ endif()
 
 if(RMELM_BUILD_TESTS)
   enable_testing()
-  foreach(t test_props test_kernels)
+  foreach(t test_props test_kernels test_diffusion)
     add_executable(${t} tests/${t}.c)
     target_link_libraries(${t} PRIVATE rmelm_core)
     add_test(NAME ${t} COMMAND ${t})

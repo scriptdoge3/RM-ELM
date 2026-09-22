@@ -5,6 +5,8 @@
 #include <math.h>
 #include <stdio.h>
 
+#define RM_PI 3.14159265358979323846
+
 static int rm_test_failures = 0;
 static int rm_test_checks = 0;
 
