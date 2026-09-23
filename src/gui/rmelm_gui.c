@@ -658,18 +658,32 @@ static void core_statistics(void)
     CS.pa233_kg = pa * 1e24 * V * 233.0 / 6.022e23 / 1000.0;
 }
 
-/* dark blue -> green -> amber -> red */
-static Color heat(double f)
+/* one channel lamp of the core map: an incandescent bulb behind a clear
+ * lens, driven by the channel signal so it glows brighter as the value rises
+ * (f = 0..1); past the alarm point a red lens is switched in and flashes */
+static void map_lamp(Vector2 p, float rad, double f, int blink)
 {
-    static const Color st[4] = {{40, 60, 130, 255}, {60, 170, 90, 255}, {245, 190, 60, 255}, {235, 55, 40, 255}};
     if (f < 0) f = 0;
     if (f > 1) f = 1;
-    double s = f * 3;
-    int i = s >= 3 ? 2 : (int)s;
-    double t = s - i;
-    Color a = st[i], b = st[i + 1];
-    return (Color){(unsigned char)(a.r + (b.r - a.r) * t), (unsigned char)(a.g + (b.g - a.g) * t),
-                   (unsigned char)(a.b + (b.b - a.b) * t), 255};
+    DrawCircleV(p, rad, (Color){20, 18, 16, 255});                   /* socket */
+    float lr = rad * 0.78f;
+    if (f > 0.92) {
+        Color red = blink ? (Color){255, 70, 40, 255} : (Color){110, 26, 18, 255};
+        if (blink) DrawCircleV(p, rad + 1.5f, (Color){255, 60, 30, 70});
+        DrawCircleV(p, lr, red);
+    } else {
+        /* filament colour: dull ember -> orange -> yellow -> near white */
+        static const float K[4][4] = {{0.0f, 45, 18, 8}, {0.35f, 190, 70, 14}, {0.65f, 255, 190, 60}, {0.92f, 255, 248, 215}};
+        int k = f < K[1][0] ? 0 : (f < K[2][0] ? 1 : 2);
+        float t = (float)((f - K[k][0]) / (K[k + 1][0] - K[k][0]));
+        if (t > 1) t = 1;
+        Color c = {(unsigned char)(K[k][1] + (K[k + 1][1] - K[k][1]) * t), (unsigned char)(K[k][2] + (K[k + 1][2] - K[k][2]) * t),
+                   (unsigned char)(K[k][3] + (K[k + 1][3] - K[k][3]) * t), 255};
+        double g = f;
+        if (g > 0.5) DrawCircleV(p, rad + 1.5f, (Color){255, 220, 140, (unsigned char)(120 * (g - 0.5))});
+        DrawCircleV(p, lr, c);
+    }
+    DrawCircleV((Vector2){p.x - lr * 0.3f, p.y - lr * 0.3f}, lr * 0.28f, (Color){255, 255, 255, 60});
 }
 
 static double cm_value(int ch, double *lo, double *hi)
@@ -677,8 +691,8 @@ static double cm_value(int ch, double *lo, double *hi)
     double pref = RM_P_RATED / P->core.nchan;
     switch (cm_mode) {
     case 0: *lo = 0; *hi = 2.0; return CS.pch[ch] / pref;
-    case 1: *lo = 350; *hi = 600; return CS.tout[ch] - 273.15;
-    case 2: *lo = 350; *hi = 700; return CS.tclad[ch] - 273.15;
+    case 1: *lo = 450; *hi = 600; return CS.tout[ch] - 273.15;
+    case 2: *lo = 450; *hi = 700; return CS.tclad[ch] - 273.15;
     default: *lo = 0; *hi = 1; return 1.0 - fmin(CS.margin[ch], 600.0) / 600.0;
     }
 }
@@ -703,39 +717,49 @@ static void draw_coremon(Rectangle r)
 
     /* core map */
     Rectangle mp = {r.x + 12, r.y + 64, 300, 300};
-    DrawRectangleRec(mp, (Color){30, 34, 32, 255});
+    DrawRectangleRec(mp, (Color){40, 42, 40, 255});
     DrawRectangleLinesEx(mp, 2, BEZEL);
     Vector2 o = {mp.x + mp.width / 2, mp.y + mp.height / 2};
     const float sc = 0.78f;
     float hr = RM_PITCH * sc / sqrtf(3.0f);
     int hover = -1;
     int sel = cm_sel >= 0 ? cm_sel : CS.hot;
+    int blink = ((int)(GetTime() * 3)) & 1;
     for (int col = 0; col < g->n; col++) {
         if (g->ring[col] > RM_CORE_RINGS) continue;
         double x, y;
         rm_hexgrid_xy(g, col, RM_PITCH * sc, &x, &y);
         Vector2 p = {o.x + (float)x, o.y + (float)y};
         if (c->coltype[col] == COL_CTRL) {
-            DrawPoly(p, 6, hr - 0.8f, 30, (Color){16, 16, 16, 255});
+            /* control rod thimble: black blanking plug */
+            DrawCircleV(p, hr - 0.6f, (Color){10, 10, 10, 255});
+            DrawCircleLinesV(p, hr * 0.5f, (Color){70, 70, 66, 255});
             continue;
         }
         int ch = c->chan_of_col[col];
         double lo, hi, v = cm_value(ch, &lo, &hi);
-        DrawPoly(p, 6, hr - 0.8f, 30, heat((v - lo) / (hi - lo)));
-        if (ch == sel) DrawPolyLinesEx(p, 6, hr + 0.5f, 30, 2, WHITE);
+        map_lamp(p, hr - 0.6f, (v - lo) / (hi - lo), blink);
+        if (ch == sel) DrawCircleLinesV(p, hr + 0.6f, WHITE);
         if (CheckCollisionPointCircle(m, p, hr * 0.9f)) {
             hover = ch;
             if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) cm_sel = cm_sel == ch ? -1 : ch;
         }
     }
-    /* scale */
-    Rectangle sb = {mp.x, mp.y + mp.height + 6, mp.width, 10};
-    for (int i = 0; i < 60; i++)
-        DrawRectangleRec((Rectangle){sb.x + sb.width * i / 60, sb.y, sb.width / 60 + 1, sb.height}, heat(i / 59.0));
+    /* reference lamps: what each glow means in the selected mode */
+    Rectangle sb = {mp.x, mp.y + mp.height + 4, mp.width, 26};
+    DrawRectangleRec(sb, (Color){40, 42, 40, 255});
     DrawRectangleLinesEx(sb, 1, BEZEL);
-    const char *sl[4][2] = {{"0", "2 X MEAN"}, {"350 C", "600 C"}, {"350 C", "700 C"}, {"600 K", "0 K"}};
-    text(sl[cm_mode][0], sb.x, sb.y + 12, 10, INK);
-    text(sl[cm_mode][1], sb.x + sb.width - MeasureText(sl[cm_mode][1], 10), sb.y + 12, 10, INK);
+    static const char *ref[4][6] = {
+        {"0", "0.4", "0.8", "1.2", "1.6", "1.9X"},
+        {"450", "478", "505", "533", "560", "588C"},
+        {"450", "496", "542", "588", "634", "680C"},
+        {"600", "480", "360", "240", "120", "50K"},
+    };
+    for (int i = 0; i < 6; i++) {
+        float lx = sb.x + 14 + i * 48;
+        map_lamp((Vector2){lx, sb.y + 13}, 7, i < 5 ? i / 5.0 * 0.92 : 0.95, blink);
+        text(ref[cm_mode][i], lx + 11, sb.y + 8, 10, (Color){220, 216, 200, 255});
+    }
 
 
     /* axial profile of the selected channel: power bars, clad and sodium lines */

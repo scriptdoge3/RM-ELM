@@ -68,8 +68,12 @@ The top row is the reactor:
   rods are named by grid coordinates such as 16-19). The rod select matrix
   below it has one pushbutton per rod: select one, then WITHDRAW/INSERT it.
 - **Core monitoring**:
-  - A map of all 342 fuel channels, switchable between channel power,
-    outlet temperature, cladding temperature and sodium boiling margin.
+  - An analog lamp map of all 342 fuel channels: each channel is an
+    incandescent lamp that glows from a dull ember to yellow-white as its
+    value rises, and switches to a flashing red lens past the alarm point.
+    It is switchable between channel power, outlet temperature (450-600 C),
+    cladding temperature (450-700 C) and sodium boiling margin. Control rod
+    positions are black blanking plugs.
   - The axial power, clad and sodium profile of the hot channel, or of any
     channel you click.
   - Nuclear instruments: source range (cps), intermediate range (log amps),
