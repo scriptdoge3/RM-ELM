@@ -11,7 +11,7 @@ from lattice calculations on ENDF/B-VIII.1 nuclear data, not hand-tuned numbers.
 
 ## Build
 
-Needs a C compiler (GCC or Clang) and CMake 3.16+.
+Needs a C compiler (GCC or Clang), CMake 3.16+ and git.
 
 ```sh
 cmake -S . -B build
@@ -23,7 +23,27 @@ On x86-64 the assembly kernels are assembled automatically by the compiler;
 the program picks AVX or SSE2 at run time. On ARM or MSVC the C kernels are
 used. Force C with `-DRMELM_USE_ASM=OFF`.
 
-## Play
+## Play: graphical control room
+
+```sh
+./build/rmelm_gui
+```
+
+![RM-ELM control room](docs/gui.png)
+
+A point-and-click window: reactor panel with a live power/temperature
+trend, a plant diagram (pipes coloured by temperature, click a pump to start
+or stop it), a big SCRAM button, rod bank controls, automatic power control
+with a setpoint, turbine, DRACS and failure buttons, annunciator lights and a
+message log. The buttons along the top set simulation speed (x1 to x16) or
+pause.
+
+The first `cmake` configure downloads raylib 5.5 automatically (or uses one
+already installed). On Linux you need the X11/OpenGL development packages:
+`sudo apt install libgl-dev libx11-dev libxrandr-dev libxinerama-dev
+libxcursor-dev libxi-dev`. To skip the GUI: `-DRMELM_GUI=OFF`.
+
+## Play: terminal process computer
 
 ```sh
 ./build/rmelm

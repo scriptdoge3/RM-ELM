@@ -11,6 +11,7 @@ endif()
 
 option(RMELM_USE_ASM "Use the hand-written x86-64 assembly kernels" ON)
 option(RMELM_BUILD_TESTS "Build the test programs" ON)
+option(RMELM_GUI "Build the graphical control room (raylib)" ON)
 
 # The assembly kernels follow the System V AMD64 ABI and are written in GAS
 # syntax, so they need GCC or Clang on an x86-64 target. Everything else
@@ -62,6 +63,27 @@ endif()
 if(NOT WIN32)
   add_executable(rmelm src/ppc/rmelm.c)
   target_link_libraries(rmelm PRIVATE rmelm_core)
+endif()
+
+if(RMELM_GUI)
+  find_package(raylib 5.0 QUIET)
+  if(NOT raylib_FOUND)
+    include(FetchContent)
+    set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+    set(BUILD_GAMES OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(raylib
+      GIT_REPOSITORY https://github.com/raysan5/raylib.git
+      GIT_TAG 5.5
+      GIT_SHALLOW TRUE)
+    FetchContent_MakeAvailable(raylib)
+  endif()
+  find_package(Threads REQUIRED)
+  add_executable(rmelm_gui src/gui/rmelm_gui.c)
+  target_link_libraries(rmelm_gui PRIVATE rmelm_core raylib Threads::Threads)
+  if(NOT MSVC)
+    # raylib's headers are not strict-C17 clean
+    target_compile_options(rmelm_gui PRIVATE -Wno-shadow)
+  endif()
 endif()
 
 if(RMELM_BUILD_TESTS)
