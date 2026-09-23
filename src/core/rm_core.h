@@ -60,6 +60,7 @@ typedef struct {
     double *rod_vel;           /* cm/s, positive inwards */
     double bank_speed[RM_NBANKS];  /* cm/s for normal drive */
     double *rod_target;        /* cm, drive target */
+    double *rod_drift;         /* cm/s of uncommanded motion (a failed collet), 0 = none */
     int scram;
     double scram_time;
 

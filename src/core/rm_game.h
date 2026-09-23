@@ -24,6 +24,8 @@ typedef struct {
     double on_target;         /* seconds within 3% of demand */
     int trips;
     int was_scram, was_turb_trip, was_burst[RM_NLOOPS], leak_seen[RM_NLOOPS];
+    int was_fire[8], was_evac, evac_scored;
+    double evac_t;            /* sim time of the control room evacuation */
 } rm_game;
 
 void rm_game_init(rm_game *g, const rm_plant *p, unsigned seed, int failures);

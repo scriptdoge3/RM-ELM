@@ -47,6 +47,9 @@ set(RMELM_CORE_SOURCES
   src/core/rm_core.c
   src/core/rm_plant.c
   src/core/rm_game.c
+  src/core/rm_rps.c
+  src/core/rm_tg.c
+  src/core/rm_aux.c
 )
 
 if(RMELM_ASM_ACTIVE)
@@ -112,7 +115,8 @@ if(RMELM_GUI)
     endif()
   endif()
   find_package(Threads REQUIRED)
-  add_executable(rmelm_gui src/gui/rmelm_gui.c)
+  add_executable(rmelm_gui src/gui/rmelm_gui.c src/gui/gui_widgets.c src/gui/gui_ann.c src/gui/gui_main.c
+    src/gui/gui_tg.c src/gui/gui_aux.c src/gui/gui_rsp.c)
   target_link_libraries(rmelm_gui PRIVATE rmelm_core raylib Threads::Threads)
   if(NOT MSVC)
     # raylib's headers are not strict-C17 clean
@@ -122,7 +126,7 @@ endif()
 
 if(RMELM_BUILD_TESTS)
   enable_testing()
-  foreach(t test_props test_kernels test_diffusion test_core test_plant test_startup test_swr test_game)
+  foreach(t test_props test_kernels test_diffusion test_core test_plant test_startup test_swr test_game test_systems)
     add_executable(${t} tests/${t}.c)
     target_link_libraries(${t} PRIVATE rmelm_core)
     add_test(NAME ${t} COMMAND ${t})

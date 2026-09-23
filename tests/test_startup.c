@@ -20,8 +20,11 @@ static void show(const rm_plant *p, const char *what)
 /* the operator keeps the IRM on scale, ranging up and down */
 static void irm_ranging(rm_plant *p)
 {
-    while (p->irm_range < 10 && rm_plant_irm(p) > 90.0) p->irm_range++;
-    while (p->irm_range > 1 && rm_plant_irm(p) < 15.0) p->irm_range--;
+    for (int ch = 0; ch < 8; ch++) {
+        int *r = &p->nms.irm_range[ch];
+        while (*r < 10 && rm_plant_irm_ch(p, ch) > 90.0) (*r)++;
+        while (*r > 1 && rm_plant_irm_ch(p, ch) < 15.0) (*r)--;
+    }
 }
 
 static void run(rm_plant *p, double secs, double dt, const char *what, double every)
@@ -57,7 +60,7 @@ int main(void)
     CHECK(!rm_plant_set_mode(p, RM_MODE_RUN, why, sizeof why), "RUN refused at source level (%s)", why);
     rm_plant_set_mode(p, RM_MODE_STARTUP, why, sizeof why);
     CHECK(!c->scram, "STARTUP selected without a trip");
-    printf("  SRM %.0f cps, IRM range %d reads %.2f\n", rm_plant_srm_cps(p), p->irm_range, rm_plant_irm(p));
+    printf("  SRM %.0f cps, IRM range %d reads %.2f\n", rm_plant_srm_cps(p), p->nms.irm_range[0], rm_plant_irm(p));
     printf("withdraw safety bank, then shims in steps until critical:\n");
     rm_core_bank_move(c, BANK_SAFETY, 0.0);
     run(p, 90, 0.1, "safety out", 30);
@@ -88,6 +91,7 @@ int main(void)
     run(p, 900, 0.2, "feed on, to 15%", 100);
     CHECK(!c->scram, "no trip with feed on (%s)", p->first_out);
     CHECK(rm_plant_set_mode(p, RM_MODE_RUN, why, sizeof why), "RUN accepted at %.1f%% APRM", rm_plant_aprm(p));
+    p->tg.tdfp[0] = 1;   /* a turbine-driven feed pump for the power ascension */
     p->turbine_tripped = 0;
     p->generator_breaker = 1;
     p->tv_int = -2.0;

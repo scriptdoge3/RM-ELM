@@ -129,7 +129,7 @@ static void draw(rm_plant *p, const char *cmd)
     else printf("PERIOD   INFIN\033[K\n");
     static const char *mode_name[4] = {"SHUTDOWN", "REFUEL", "STARTUP", "RUN"};
     printf("   FIRST OUT: %-28s MODE %-8s  SRM %8.0f cps  IRM R%-2d %5.1f  APRM %5.1f %%\033[K\n",
-           p->first_out[0] ? p->first_out : "-", mode_name[p->mode], rm_plant_srm_cps(p), p->irm_range,
+           p->first_out[0] ? p->first_out : "-", mode_name[p->mode], rm_plant_srm_cps(p), p->nms.irm_range[0],
            rm_plant_irm(p), rm_plant_aprm(p));
     printf("   AUTO ROD %s %3.0f%%  RODS cm in:", p->auto_rod ? "ON " : "off", 100 * p->power_set);
     for (int b = 0; b < RM_NBANKS; b++) printf(" %s %5.1f", bank_name[b], rm_core_bank_pos(c, b));
@@ -205,8 +205,8 @@ static void command(rm_plant *p, char *line, int *quit)
     } else if (!strcmp(a, "RESET")) {
         if (!c->scram) logmsg(c, "NO TRIP TO RESET");
         else {
-            rm_core_reset_scram(c);
-            p->first_out[0] = 0;
+            rm_plant_rps_reset(p, 0);
+            rm_plant_rps_reset(p, 1);
             last_first_out[0] = 0;
             logmsg(c, "RPS RESET - RODS REMAIN INSERTED");
         }
@@ -220,7 +220,7 @@ static void command(rm_plant *p, char *line, int *quit)
     } else if (!strcmp(a, "IRM") && n >= 2) {
         int rg = atoi(b);
         if (rg < 1 || rg > 10) { logmsg(c, "IRM <1-10>"); return; }
-        p->irm_range = rg;
+        for (int k = 0; k < 8; k++) p->nms.irm_range[k] = rg;
         logmsg(c, "IRM RANGE %d", rg);
     } else if (!strcmp(a, "ROD") && n == 3) {
         char why[80];
@@ -240,6 +240,7 @@ static void command(rm_plant *p, char *line, int *quit)
         } else {
             int bk = bank_of(b);
             if (bk < 0) { logmsg(c, "UNKNOWN BANK %s", b); return; }
+            if (!rm_plant_rod_permit(p, bk, -1, pos, why, sizeof why)) { logmsg(c, "%s", why); return; }
             rm_core_bank_move(c, bk, pos);
             logmsg(c, "BANK %s -> %.1f cm (%.1f cm/s)", bank_name[bk], pos, c->bank_speed[bk]);
         }
@@ -256,18 +257,16 @@ static void command(rm_plant *p, char *line, int *quit)
         } else { logmsg(c, "?PUMP %s", d); return; }
         logmsg(c, "PUMP %s: %s%s", b, d, !strcmp(d, "PONY") ? (pp->pony_on ? " ON" : " OFF") : "");
     } else if (!strcmp(a, "TURB") && n >= 2) {
-        if (!strcmp(b, "TRIP")) { p->turbine_tripped = 1; p->generator_breaker = 0; logmsg(c, "TURBINE MANUALLY TRIPPED"); }
+        if (!strcmp(b, "TRIP")) rm_plant_turbine_trip(p, "MANUAL");
         else if (!strcmp(b, "RESET")) {
-            if (c->scram) logmsg(c, "LATCH BLOCKED: REACTOR TRIPPED");
-            else if (!p->offsite_power) logmsg(c, "LATCH BLOCKED: NO GRID TO SYNCHRONISE TO");
-            else if (p->p_header < 10.0e6) logmsg(c, "LATCH BLOCKED: STEAM PRESSURE BELOW 10 MPA");
-            else if (c->p_thermal < 0.08 * RM_P_RATED) logmsg(c, "LATCH BLOCKED: REACTOR POWER BELOW 8%%");
-            else {
-                p->turbine_tripped = 0;
-                p->generator_breaker = 1;
-                p->tv_int = -2.0;
-                logmsg(c, "TURBINE RESET, GENERATOR SYNCHRONISED");
-            }
+            /* latch, roll to speed and let the auto-synchroniser close the breaker */
+            char why[80];
+            if (!p->tg.field_breaker) p->tg.field_breaker = 1;
+            if (rm_plant_turbine_latch(p, why, sizeof why)) {
+                p->tg.auto_sync = 1;
+                p->tg.speed_target = 1800.0;
+                logmsg(c, "TURBINE ROLLING TO 1800 RPM ON AUTO SYNC");
+            } else logmsg(c, "%s", why);
         } else logmsg(c, "?TURB %s", b);
     } else if (!strcmp(a, "PSET") && n >= 2) {
         double v = atof(b);
@@ -278,6 +277,11 @@ static void command(rm_plant *p, char *line, int *quit)
     } else if (!strcmp(a, "FW") && n >= 2) {
         if (!strcmp(b, "START") || !strcmp(b, "STOP")) {
             p->fw_on = !strcmp(b, "START");
+            if (p->fw_on) {
+                /* condensate pumps and both turbine-driven feed pumps (they pick up once there is steam) */
+                p->tg.cond_pump[0] = p->tg.cond_pump[1] = 1;
+                p->tg.tdfp[0] = p->tg.tdfp[1] = 1;
+            }
             logmsg(c, "FEEDWATER PUMPS %s", p->fw_on ? "STARTED" : "STOPPED");
         } else {
             p->auto_fw = !strcmp(b, "AUTO");

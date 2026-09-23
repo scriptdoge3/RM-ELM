@@ -128,6 +128,7 @@ int rm_core_init(rm_core *c)
     c->rod_ins = dal((size_t)c->nctrl);
     c->rod_vel = dal((size_t)c->nctrl);
     c->rod_target = dal((size_t)c->nctrl);
+    c->rod_drift = dal((size_t)c->nctrl);
     c->bank_speed[BANK_REG] = 1.5;
     for (int b = BANK_SHIM_A; b <= BANK_SHIM_D; b++) c->bank_speed[b] = 0.5;
     c->bank_speed[BANK_SAFETY] = 2.0;
@@ -180,7 +181,7 @@ void rm_core_free(rm_core *c)
     rm_diff_free(&c->dif);
     rm_coreth_free(&c->th);
     free(c->coltype); free(c->chan_of_col); free(c->ctrl_of_col); free(c->col_of_chan);
-    free(c->ctrl_col); free(c->ctrl_bank); free(c->rod_ins); free(c->rod_vel); free(c->rod_target);
+    free(c->ctrl_col); free(c->ctrl_bank); free(c->rod_ins); free(c->rod_vel); free(c->rod_target); free(c->rod_drift);
     for (int i = 0; i < RM_NISO; i++) free(c->iso[i]);
     free(c->zrh_x); free(c->node_power); free(c->phi_abs[0]); free(c->phi_abs[1]);
 }
@@ -424,6 +425,18 @@ static void move_rods(rm_core *c, double dt)
         if (fabs(diff) <= step) {
             c->rod_ins[k] = c->rod_target[k];
             c->rod_vel[k] = 0.0;
+            /* a drifting rod creeps whenever its drive is idle; driven fully
+             * in, the collet latches and the drift stops */
+            if (c->rod_drift[k] != 0.0) {
+                c->rod_ins[k] += c->rod_drift[k] * dt;
+                if (c->rod_ins[k] >= RM_ACTIVE_H) {
+                    c->rod_ins[k] = RM_ACTIVE_H;
+                    c->rod_drift[k] = 0.0;
+                }
+                if (c->rod_ins[k] < 0) c->rod_ins[k] = 0;
+                c->rod_target[k] = c->rod_ins[k];
+                c->rod_vel[k] = c->rod_drift[k];
+            }
         } else {
             c->rod_ins[k] += diff > 0 ? step : -step;
             c->rod_vel[k] = diff > 0 ? v : -v;
@@ -581,6 +594,7 @@ void rm_core_shutdown(rm_core *c, double T)
     for (int k = 0; k < c->nctrl; k++) {
         c->rod_ins[k] = c->rod_target[k] = RM_ACTIVE_H;
         c->rod_vel[k] = 0.0;
+        c->rod_drift[k] = 0.0;
     }
     c->scram = 0;
     rm_coreth_isothermal(&c->th, T);
