@@ -9,6 +9,7 @@
  * energised, GREEN = stopped / open.
  */
 #include "raylib.h"
+#include "rm_game.h"
 #include "rm_plant.h"
 #include "rm_sodium.h"
 
@@ -19,6 +20,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define WIN_W 1280
 #define WIN_H 800
@@ -32,11 +34,6 @@ static const Color PAINT_LO = {98, 112, 100, 255};
 static const Color INK = {32, 38, 34, 255};
 static const Color BEZEL = {30, 30, 28, 255};
 static const Color FACE = {238, 230, 206, 255};      /* meter face / chart paper */
-static const Color SLATE = {56, 66, 62, 255};        /* mimic board */
-static const Color TAPE_PRI = {196, 60, 40, 255};
-static const Color TAPE_SEC = {226, 142, 40, 255};
-static const Color TAPE_STM = {80, 130, 210, 255};
-static const Color TAPE_W = {226, 226, 216, 255};
 static const Color LED = {255, 46, 24, 255};
 static const Color L_RED = {240, 60, 44, 255};
 static const Color L_GRN = {60, 220, 90, 255};
@@ -47,8 +44,12 @@ static const Color PEN_RED = {200, 30, 30, 255};
 
 /* ---- state -------------------------------------------------------------- */
 static rm_plant *P;
+static rm_game G;
 static volatile int loaded = 0;
-static int speed = 1, paused = 0;
+static int paused = 0;
+static int start_hot = 0;               /* start from hot shutdown instead of rated power */
+static int random_failures = 1;
+static unsigned msg_seen = 0;
 #define NTR 480                         /* recorder samples, one every 0.5 s */
 static float trend_p[NTR], trend_t[NTR];
 static int ntr = 0;
@@ -57,7 +58,6 @@ static long nsamp = 0;
 static char logs[NLOG][100];
 static char last_first_out[48] = "";
 static double last_log_time = -100;
-static int show_rods = 0;               /* centre board: 0 = plant mimic, 1 = rod select */
 static int sel_rod = -1;                /* selected rod (core index) or -1 */
 
 static void logmsg(const char *fmt, ...)
@@ -78,7 +78,8 @@ static void *loader(void *arg)
 {
     (void)arg;
     rm_plant_init(P);
-    rm_plant_steady(P);
+    if (start_hot) rm_plant_hot_standby(P);
+    else rm_plant_steady(P);
     loaded = 1;
     return NULL;
 }
@@ -392,8 +393,8 @@ static void draw_reactor(Rectangle r)
     cell[5].lab = "CLAD MAX C";
     snprintf(cell[6].val, 16, "%4.0f", P->T_core_in - 273.15);
     cell[6].lab = "CORE IN C";
-    snprintf(cell[7].val, 16, "%4.0f", c->p_decay / 1e6);
-    cell[7].lab = "DECAY MW";
+    snprintf(cell[7].val, 16, "%5.1f", log10(fmax(c->p_thermal / RM_P_RATED, 1e-12)));
+    cell[7].lab = "LOG POWER";
     for (int i = 0; i < 8; i++) {
         float cx = x0 + (i % 2) * 98, cy = y + (i / 2) * 50;
         dymo(cx, cy, cell[i].lab);
@@ -404,119 +405,6 @@ static void draw_reactor(Rectangle r)
     float mw = (r.width - 30) / 2;
     meter((Rectangle){r.x + 12, r.y + 342, mw, 128}, "CORE FLOW %", 100 * P->W_core / rm_plant_nominal_flow(), 0, 120, 0, 80, 4);
     meter((Rectangle){r.x + 18 + mw, r.y + 342, mw, 128}, "CORE OUTLET C", P->T_core_out - 273.15, 300, 700, 600, 700, 4);
-}
-
-static void tape(float x1, float y1, float x2, float y2, Color c)
-{
-    DrawLineEx((Vector2){x1, y1}, (Vector2){x2, y2}, 5, c);
-}
-
-/* pump symbol with its status lamp; click toggles */
-static void pump(rm_pump *pm, float x, float y, const char *name, int primary, int idx)
-{
-    int running = pm->motor_on && !pm->tripped;
-    DrawCircleV((Vector2){x, y}, 11, SLATE);
-    DrawRing((Vector2){x, y}, 9, 11.5f, 0, 360, 24, TAPE_W);
-    DrawTriangle((Vector2){x - 5, y - 5}, (Vector2){x - 5, y + 5}, (Vector2){x + 6, y}, TAPE_W);
-    lamp(x, y - 20, 4, running ? L_RED : L_GRN, 1);
-    text(name, x + 8, y - 25, 10, TAPE_W);
-    Rectangle hit = {x - 13, y - 26, 26, 40};
-    if (CheckCollisionPointRec(GetMousePosition(), hit) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-        const char *kind = primary ? "PRIMARY" : "SECONDARY";
-        if (running) {
-            pm->motor_on = 0;
-            logmsg("%s PUMP %d STOPPED", kind, idx + 1);
-        } else {
-            pm->tripped = 0;
-            pm->motor_on = 1;
-            if (primary) pm->speed_set = 1.0;
-            logmsg("%s PUMP %d STARTED", kind, idx + 1);
-        }
-    }
-}
-
-static void draw_mimic(Rectangle r)
-{
-    rm_core *c = &P->core;
-    steel(r, "PLANT MIMIC");
-    Rectangle b = {r.x + 8, r.y + 30, r.width - 16, 326};
-    DrawRectangleRec(b, SLATE);
-    DrawRectangleLinesEx(b, 2, BEZEL);
-    float ix = b.x, iy = b.y;
-
-    /* reactor vessel */
-    Rectangle v = {ix + 14, iy + 16, 72, 272};
-    DrawRectangleRoundedLinesEx(v, 0.3f, 6, 2, TAPE_W);
-    Rectangle core = {v.x + 16, v.y + 100, 40, 76};
-    DrawRectangleRec(core, (Color){120, 70, 50, 255});
-    for (int k = 1; k < 5; k++)
-        DrawLineEx((Vector2){core.x + k * 8, core.y + 2}, (Vector2){core.x + k * 8, core.y + core.height - 2}, 1,
-                   (Color){200, 140, 90, 255});
-    DrawRectangleLinesEx(core, 1, TAPE_W);
-    ctext("CORE", v.x + v.width / 2, core.y + core.height + 4, 10, TAPE_W);
-    textf(v.x + 8, v.y + 12, 10, TAPE_W, "OUT %3.0fC", P->T_core_out - 273.15);
-    textf(v.x + 8, v.y + v.height - 22, 10, TAPE_W, "IN  %3.0fC", P->T_core_in - 273.15);
-    int crit = !c->scram && c->p_thermal > 0.01 * RM_P_RATED;
-    int blink = ((int)(GetTime() * 2)) & 1;
-    lamp(v.x + 20, v.y + 50, 6, L_WHT, crit);
-    text("CRIT", v.x + 30, v.y + 45, 10, TAPE_W);
-    lamp(v.x + 20, v.y + 72, 6, L_RED, c->scram && blink);
-    text("TRIP", v.x + 30, v.y + 67, 10, TAPE_W);
-
-    /* four loops */
-    float hx = ix + 320;   /* steam header */
-    for (int i = 0; i < RM_NLOOPS; i++) {
-        rm_loop *l = &P->loop[i];
-        float y = iy + 34 + i * 74;
-        tape(v.x + v.width, y, ix + 150, y, TAPE_PRI);
-        tape(ix + 150, y + 32, v.x + v.width, y + 32, TAPE_PRI);
-        textf(ix + 94, y - 14, 10, TAPE_W, "%4.0f KG/S", l->W);
-        Rectangle ihx = {ix + 150, y - 8, 28, 48};
-        DrawRectangleRec(ihx, SLATE);
-        DrawRectangleLinesEx(ihx, 2, TAPE_W);
-        ctext("IHX", ihx.x + 14, ihx.y + 19, 10, TAPE_W);
-        pump(&l->ppump, ix + 116, y + 32, TextFormat("P%d", i + 1), 1, i);
-
-        tape(ix + 178, y, ix + 262, y, TAPE_SEC);
-        tape(ix + 262, y + 32, ix + 178, y + 32, TAPE_SEC);
-        pump(&l->spump, ix + 220, y + 32, TextFormat("S%d", i + 1), 0, i);
-
-        Rectangle sg = {ix + 262, y - 10, 26, 52};
-        DrawRectangleRoundedLinesEx(sg, 0.5f, 4, 2, TAPE_W);
-        ctext("SG", sg.x + 13, sg.y + 20, 10, TAPE_W);
-        textf(ix + 200, y - 14, 10, TAPE_W, "%3.0f MW", l->sg.Q / 1e6);
-        tape(sg.x + sg.width, y - 4, hx, y - 4, TAPE_STM);
-    }
-    tape(hx, iy + 30, hx, iy + 34 + 3 * 74 - 4, TAPE_STM);
-    tape(hx, iy + 140, ix + 340, iy + 140, TAPE_STM);
-
-    /* turbine and generator */
-    float tx = ix + 340, ty = iy + 110;
-    Color tc = P->turbine_tripped ? (Color){90, 70, 66, 255} : (Color){150, 156, 160, 255};
-    DrawTriangle((Vector2){tx, ty + 18}, (Vector2){tx, ty + 42}, (Vector2){tx + 40, ty + 60}, tc);
-    DrawTriangle((Vector2){tx, ty + 18}, (Vector2){tx + 40, ty + 60}, (Vector2){tx + 40, ty}, tc);
-    tape(tx + 40, ty + 30, tx + 52, ty + 30, TAPE_W);
-    DrawCircleV((Vector2){tx + 64, ty + 30}, 12, SLATE);
-    DrawRing((Vector2){tx + 64, ty + 30}, 10, 12.5f, 0, 360, 24, TAPE_W);
-    ctext("G", tx + 64, ty + 25, 10, TAPE_W);
-    lamp(tx + 8, ty + 76, 5, P->turbine_tripped ? L_GRN : L_RED, 1);
-    text("TURB", tx + 16, ty + 71, 10, TAPE_W);
-    lamp(tx + 8, ty + 94, 5, P->generator_breaker ? L_RED : L_GRN, 1);
-    text("BKR", tx + 16, ty + 89, 10, TAPE_W);
-    lamp(tx + 8, ty + 112, 5, L_AMB, P->bypass_valve > 0.01);
-    text("BYP", tx + 16, ty + 107, 10, TAPE_W);
-    lamp(tx + 8, ty + 130, 5, L_AMB, P->W_relief > 0 && blink);
-    text("SRV", tx + 16, ty + 125, 10, TAPE_W);
-    text("NET MWE", tx - 6, iy + 262, 10, TAPE_W);
-    readout(tx - 6, iy + 276, 18, 4, "%4.0f", fmax(P->P_net / 1e6, 0));
-
-    text("LAMPS: RED = RUNNING/CLOSED  GREEN = STOPPED/OPEN", ix + 10, iy + 298, 10, TAPE_W);
-    text("CLICK A PUMP TO START / STOP", ix + 10, iy + 311, 10, (Color){170, 180, 176, 255});
-
-    float mw = (r.width - 16 - 12) / 3;
-    meter((Rectangle){r.x + 8, r.y + 362, mw, 110}, "STEAM MPA", P->p_header / 1e6, 0, 20, 16, 20, 4);
-    meter((Rectangle){r.x + 14 + mw, r.y + 362, mw, 110}, "GEN MWE", P->P_gen / 1e6, 0, 1200, 1050, 1200, 2);
-    meter((Rectangle){r.x + 20 + 2 * mw, r.y + 362, mw, 110}, "DRACS MW", P->Q_dracs / 1e6, 0, 100, 0, 0, 2);
 }
 
 /* ---- full core display and rod select matrix -------------------------------- */
@@ -752,8 +640,8 @@ static void draw_controls(Rectangle r)
     }
     dymo(r.x + 146, y, "DEMAND %");
     readout(r.x + 146, y + 18, 22, 3, "%3.0f", 100 * P->power_set);
-    if (lampbutton((Rectangle){r.x + 222, y + 16, 78, 36}, "LOWER", L_WHT, 0)) P->power_set = fmax(0.05, P->power_set - 0.05);
-    if (lampbutton((Rectangle){r.x + 306, y + 16, 78, 36}, "RAISE", L_WHT, 0)) P->power_set = fmin(1.05, P->power_set + 0.05);
+    if (lampbutton((Rectangle){r.x + 222, y + 16, 78, 36}, "LOWER", L_WHT, 0)) P->power_set = fmax(0.01, P->power_set - (P->power_set > 0.1 ? 0.05 : 0.01));
+    if (lampbutton((Rectangle){r.x + 306, y + 16, 78, 36}, "RAISE", L_WHT, 0)) P->power_set = fmin(1.05, P->power_set + (P->power_set >= 0.1 ? 0.05 : 0.01));
 
     /* turbine and DRACS */
     y = r.y + 444;
@@ -764,10 +652,16 @@ static void draw_controls(Rectangle r)
         logmsg("TURBINE TRIPPED");
     }
     if (lampbutton((Rectangle){r.x + 92, y + 16, 76, 36}, "LATCH", L_RED, !P->turbine_tripped) && P->turbine_tripped) {
-        P->turbine_tripped = 0;
-        P->generator_breaker = 1;
-        P->tv_int = -2.0;
-        logmsg("TURBINE LATCHED, GENERATOR SYNCHRONISED");
+        if (c->scram) logmsg("LATCH BLOCKED: REACTOR TRIPPED");
+        else if (!P->offsite_power) logmsg("LATCH BLOCKED: NO GRID TO SYNCHRONISE TO");
+        else if (P->p_header < 10.0e6) logmsg("LATCH BLOCKED: STEAM PRESSURE BELOW 10 MPA");
+        else if (c->p_thermal < 0.08 * RM_P_RATED) logmsg("LATCH BLOCKED: REACTOR POWER BELOW 8%%");
+        else {
+            P->turbine_tripped = 0;
+            P->generator_breaker = 1;
+            P->tv_int = -2.0;
+            logmsg("TURBINE LATCHED, GENERATOR SYNCHRONISED");
+        }
     }
     dymo(r.x + 186, y, "DRACS DAMPERS");
     const char *dl[3] = {"AUTO", "OPEN", "CLOSE"};
@@ -781,81 +675,92 @@ static void draw_controls(Rectangle r)
         }
     }
 
-    /* training sub-panel */
-    Rectangle tp = {r.x + 10, r.y + 508, r.width - 20, 108};
-    DrawRectangleRec(tp, (Color){196, 164, 90, 255});
-    DrawRectangleLinesEx(tp, 2, BEZEL);
-    for (float sx = tp.x + 4; sx < tp.x + tp.width - 12; sx += 16)
-        DrawTriangle((Vector2){sx, tp.y + 2}, (Vector2){sx + 8, tp.y + 10}, (Vector2){sx + 8, tp.y + 2}, BEZEL);
-    plate(tp.x + 8, tp.y + 14, "TRAINING - FAULT INJECTION", 10);
-    if (lampbutton((Rectangle){tp.x + 8, tp.y + 38, 86, 36}, "LOSE\nGRID", L_RED, !P->offsite_power)) {
-        P->offsite_power = !P->offsite_power;
-        logmsg(P->offsite_power ? "OFFSITE POWER RESTORED" : "LOSS OF OFFSITE POWER");
-    }
-    for (int i = 0; i < 3; i++) {
+    /* loop control: pumps, hydrogen meters, SG isolation, feedwater */
+    Rectangle tp = {r.x + 10, r.y + 506, r.width - 20, 232};
+    DrawRectangleRec(tp, (Color){138, 156, 140, 255});
+    DrawRectangleLinesEx(tp, 1, BEZEL);
+    dymo(tp.x + 6, tp.y + 8, "LOOPS");
+    const char *rows[4] = {"PRIMARY", "SECONDARY", "H2 PPM", "SG"};
+    for (int k = 0; k < 4; k++) dymo(tp.x + 6, tp.y + 36 + k * 38, rows[k]);
+    for (int i = 0; i < RM_NLOOPS; i++) {
+        rm_loop *l = &P->loop[i];
+        float x = tp.x + 76 + i * 74, yy = tp.y + 8;
         char lb[16];
-        snprintf(lb, sizeof lb, "FAIL\nDG%d", i + 1);
-        if (lampbutton((Rectangle){tp.x + 100 + i * 70, tp.y + 38, 64, 36}, lb, L_RED, !P->diesel_avail[i])) {
-            P->diesel_avail[i] = !P->diesel_avail[i];
-            logmsg("DIESEL %d %s", i + 1, P->diesel_avail[i] ? "REPAIRED" : "FAILED");
+        snprintf(lb, sizeof lb, "LOOP %d", i + 1);
+        dymo(x + 12, yy, lb);
+        rm_pump *pm[2] = {&l->ppump, &l->spump};
+        for (int k = 0; k < 2; k++) {
+            int run = pm[k]->motor_on && !pm[k]->tripped;
+            float by = tp.y + 28 + k * 38;
+            if (lampbutton((Rectangle){x, by, 34, 30}, "RUN", L_RED, run) && !run) {
+                pm[k]->tripped = 0;
+                pm[k]->motor_on = 1;
+                pm[k]->speed_set = 1.0;
+                logmsg("%s PUMP %d STARTED", k ? "SECONDARY" : "PRIMARY", i + 1);
+            }
+            if (lampbutton((Rectangle){x + 36, by, 34, 30}, "STOP", L_GRN, !run) && run) {
+                pm[k]->motor_on = 0;
+                logmsg("%s PUMP %d STOPPED", k ? "SECONDARY" : "PRIMARY", i + 1);
+            }
+        }
+        readout(x, tp.y + 105, 15, 4, "%4.2f", fmin(l->sg.h2, 99.99));
+        if (l->sg.h2 > RM_H2_ALARM) lamp(x + 64, tp.y + 105, 4, L_RED, ((int)(GetTime() * 3)) & 1);
+        int iso = l->sg.isolated;
+        if (lampbutton((Rectangle){x, tp.y + 142, 70, 30}, l->sg.disc_burst ? "DISC\nBURST" : "ISOLATE",
+                       l->sg.disc_burst ? L_RED : L_AMB, iso) && !iso) {
+            rm_plant_isolate_sg(P, i);
         }
     }
-    lamp(tp.x + 16, tp.y + 90, 5, P->offsite_power ? L_RED : L_GRN, 1);
-    text("GRID BKR", tp.x + 26, tp.y + 85, 10, INK);
-    for (int i = 0; i < 3; i++) {
-        lamp(tp.x + 116 + i * 70, tp.y + 90, 5, P->diesel_running[i] ? L_RED : L_GRN, 1);
-        textf(tp.x + 126 + i * 70, tp.y + 85, 10, INK, "DG%d RUN", i + 1);
+    float fy = tp.y + 186;
+    dymo(tp.x + 6, fy + 10, "FEEDWATER");
+    if (lampbutton((Rectangle){tp.x + 76, fy, 70, 36}, "START", L_RED, P->fw_on) && !P->fw_on) {
+        P->fw_on = 1;
+        logmsg("FEEDWATER PUMPS STARTED");
     }
-
-    /* operator's index card */
-    Rectangle cd = {r.x + 14, r.y + 626, r.width - 28, 112};
-    DrawRectangleRec((Rectangle){cd.x + 3, cd.y + 3, cd.width, cd.height}, alpha(BLACK, 60));
-    DrawRectangleRec(cd, (Color){244, 238, 214, 255});
-    for (int k = 1; k < 8; k++)
-        DrawLine((int)cd.x, (int)(cd.y + 18 + k * 12), (int)(cd.x + cd.width), (int)(cd.y + 18 + k * 12), (Color){170, 190, 220, 255});
-    DrawLine((int)cd.x, (int)(cd.y + 18), (int)(cd.x + cd.width), (int)(cd.y + 18), (Color){220, 120, 120, 255});
-    DrawRectangleRec((Rectangle){cd.x + 20, cd.y - 6, 44, 14}, (Color){230, 226, 200, 150});
-    DrawRectangleRec((Rectangle){cd.x + cd.width - 64, cd.y - 6, 44, 14}, (Color){230, 226, 200, 150});
-    const char *notes[] = {
-        "OPERATOR NOTES - UNIT 1",
-        "* AUTO HOLDS POWER AT DEMAND. RAISE/LOWER = LOAD.",
-        "* MAN TO DRIVE THE REG BANK BY HAND.",
-        "* CLICK A PUMP ON THE MIMIC TO START/STOP IT.",
-        "* 2 PRIMARY PUMPS OFF = REACTOR TRIP.",
-        "* AFTER A TRIP: TRIP RESET, THEN WITHDRAW RODS.",
-        "* NO RPS BYPASS W/O SHIFT SUPV. APPROVAL!",
-    };
-    for (int i = 0; i < 7; i++)
-        text(notes[i], cd.x + 8, cd.y + 5 + i * 12 + (i ? 8 : 0), 10, (Color){30, 34, 70, 255});
+    if (lampbutton((Rectangle){tp.x + 150, fy, 70, 36}, "STOP", L_GRN, !P->fw_on) && P->fw_on) {
+        P->fw_on = 0;
+        logmsg("FEEDWATER PUMPS STOPPED");
+    }
+    double wfw = 0;
+    for (int i = 0; i < RM_NLOOPS; i++) wfw += P->loop[i].sg.W_fw;
+    dymo(tp.x + 232, fy - 4, "FEED KG/S");
+    readout(tp.x + 232, fy + 10, 16, 4, "%4.0f", wfw);
 }
 
 static void draw_annunciators(Rectangle r)
 {
     rm_core *c = &P->core;
     steel(r, NULL);
-    int pumps_off = 0;
-    for (int i = 0; i < RM_NLOOPS; i++) pumps_off += !P->loop[i].ppump.motor_on || P->loop[i].ppump.tripped;
+    int pumps_off = 0, h2 = 0;
+    for (int i = 0; i < RM_NLOOPS; i++) {
+        rm_loop *l = &P->loop[i];
+        pumps_off += !l->ppump.motor_on || l->ppump.tripped || !l->spump.motor_on || l->spump.tripped;
+        h2 |= l->sg.h2 > RM_H2_ALARM;
+    }
+    double reg = rm_core_bank_pos(c, BANK_REG);
     struct { const char *l1, *l2; int on; int red; Color c; } a[] = {
         {"REACTOR", "TRIP", c->scram, 1, L_RED},
         {"NEUTRON FLUX", "HIGH", c->p_thermal > 1.05 * RM_P_RATED, 1, L_RED},
         {"PERIOD", "SHORT", isfinite(P->period) && P->period > 0 && P->period < 30, 1, L_RED},
         {"CORE FLOW", "LOW", P->W_core < 0.9 * rm_plant_nominal_flow(), 0, L_AMB},
-        {"PRIMARY PUMP", "OFF", pumps_off > 0, 0, L_AMB},
+        {"SODIUM PUMP", "OFF", pumps_off > 0, 0, L_AMB},
         {"CORE OUTLET", "TEMP HIGH", P->T_core_out > 833.15, 0, L_AMB},
         {"CLADDING", "TEMP HIGH", rm_core_max_clad_T(c) > 923.15, 1, L_RED},
+        {"H2 IN SODIUM", "HIGH", h2, 1, L_RED},
         {"TURBINE", "TRIP", P->turbine_tripped, 0, L_AMB},
         {"STEAM SAFETY", "VALVE OPEN", P->W_relief > 0, 0, L_AMB},
         {"OFFSITE", "POWER LOST", !P->offsite_power, 1, L_RED},
         {"DIESEL GEN", "RUNNING", P->diesel_running[0] || P->diesel_running[1] || P->diesel_running[2], 0, L_AMB},
         {"DRACS", "COOLING", P->Q_dracs > 1e6, 0, L_WHT},
         {"RPS", "BYPASSED", P->rps_bypass, 1, L_RED},
-        {"ROD CONTROL", "AUTO", P->auto_rod, 0, L_WHT},
+        {"REG BANK", "AT LIMIT", P->auto_rod && !c->scram && (reg < 0.5 || reg > RM_ACTIVE_H - 0.5), 0, L_AMB},
+        {"LOAD", "DEVIATION", G.on_line && fabs(rm_game_deviation(&G, P)) > 0.05, 0, L_AMB},
     };
     int n = sizeof a / sizeof a[0];
-    float w = (r.width - 36) / 7, h = 50;
+    float w = (r.width - 36) / 8, h = 50;
     int blink = ((int)(GetTime() * 2.5)) & 1;
     for (int i = 0; i < n; i++) {
-        Rectangle t = {r.x + 18 + (i % 7) * w, r.y + 10 + (i / 7) * (h + 4), w - 2, h};
+        Rectangle t = {r.x + 18 + (i % 8) * w, r.y + 10 + (i / 8) * (h + 4), w - 2, h};
         window(t, a[i].l1, a[i].l2, a[i].c, a[i].on && (!a[i].red || blink));
     }
 }
@@ -887,21 +792,20 @@ static void header(void)
 {
     plate(10, 8, "RM-ELM   UNIT 1   MAIN CONTROL BOARD", 16);
     int t = (int)P->t;
-    dymo(420, 4, "PLANT TIME");
-    readout(420, 18, 18, 6, "%02d:%02d:%02d", t / 3600, t / 60 % 60, t % 60);
-    dymo(560, 16, "SIM RATE");
-    const int sp[5] = {1, 2, 4, 8, 16};
-    for (int i = 0; i < 5; i++) {
-        char lb[8];
-        snprintf(lb, sizeof lb, "X%d", sp[i]);
-        if (lampbutton((Rectangle){(float)(626 + i * 48), 6, 44, 34}, lb, L_WHT, speed == sp[i] && !paused)) {
-            speed = sp[i];
-            paused = 0;
-        }
-    }
-    if (lampbutton((Rectangle){870, 6, 60, 34}, "HOLD", L_AMB, paused)) paused = !paused;
-    if (lampbutton((Rectangle){960, 6, 80, 34}, "PLANT\nMIMIC", L_WHT, !show_rods)) show_rods = 0;
-    if (lampbutton((Rectangle){1044, 6, 80, 34}, "ROD\nSELECT", L_WHT, show_rods)) show_rods = 1;
+    dymo(400, 4, "PLANT TIME");
+    readout(400, 18, 18, 6, "%02d:%02d:%02d", t / 3600, t / 60 % 60, t % 60);
+    dymo(540, 4, "DISPATCH MWE");
+    if (G.on_line) readout(540, 18, 18, 4, "%4.0f", G.demand);
+    else readout(540, 18, 18, 4, "----");
+    dymo(630, 4, "NET MWE");
+    readout(630, 18, 18, 4, "%4.0f", fmax(P->P_net / 1e6, 0.0));
+    dymo(720, 4, "STEAM MPA");
+    readout(720, 18, 18, 3, "%4.1f", P->p_header / 1e6);
+    dymo(800, 4, "SCORE");
+    readout(800, 18, 18, 6, "%6.0f", fmax(fmin(G.score, 999999.0), -99999.0));
+    dymo(920, 4, "MWH SENT");
+    readout(920, 18, 18, 6, "%6.0f", fmin(G.mwh, 999999.0));
+    if (lampbutton((Rectangle){1060, 6, 60, 34}, "HOLD", L_AMB, paused)) paused = !paused;
     dymo(1180, 16, "F12 = PHOTO");
 }
 
@@ -913,11 +817,51 @@ static void loading_screen(void)
     steel(b, "RM-ELM   UNIT 1");
     int blink = ((int)(GetTime() * 2)) & 1;
     readout(b.x + 190, b.y + 60, 60, 4, blink ? "8888" : "    ");
-    ctext("PLANT COMPUTER CONVERGING TO RATED POWER", b.x + b.width / 2, b.y + 170, 10, INK);
+    ctext(start_hot ? "PLANT COMPUTER SETTING UP HOT SHUTDOWN" : "PLANT COMPUTER CONVERGING TO RATED POWER",
+          b.x + b.width / 2, b.y + 170, 10, INK);
     ctext("STAND BY", b.x + b.width / 2, b.y + 186, 10, INK);
     int k = (int)(GetTime() * 6) % 8;
     for (int i = 0; i < 8; i++) lamp(b.x + 160 + i * 40, b.y + 240, 8, i % 2 ? L_AMB : L_WHT, i == k);
     EndDrawing();
+}
+
+/* returns 1 once a start has been chosen */
+static int start_menu(void)
+{
+    int go = 0;
+    BeginDrawing();
+    ClearBackground(WALL);
+    Rectangle b = {290, 150, 700, 500};
+    steel(b, "RM-ELM   UNIT 1   SHIFT TURNOVER");
+    float x = b.x + 40, y = b.y + 50;
+    const char *brief[] = {
+        "YOU HAVE THE WATCH. THE LOAD DISPATCHER WILL ORDER NET OUTPUT IN MWE:",
+        "FOLLOW IT WITH THE POWER DEMAND. POINTS FOR EVERY MWH SENT ON TARGET,",
+        "PENALTIES FOR TRIPS. EQUIPMENT CAN FAIL AT ANY TIME - WATCH THE",
+        "ANNUNCIATORS, THE ALARM TYPER AND THE HYDROGEN METERS.",
+        "",
+        "HOT SHUTDOWN START: WITHDRAW SAFETY BANK, THEN SHIMS UNTIL THE PERIOD",
+        "GOES POSITIVE. SELECT AUTO WITH A LOW DEMAND, START FEEDWATER AT A FEW",
+        "PERCENT, LATCH THE TURBINE ABOVE 8%, THEN RAISE POWER. PULL SHIMS WHEN",
+        "THE REG BANK REACHES ITS LIMIT.",
+    };
+    for (int i = 0; i < 9; i++) text(brief[i], x, y + i * 16, 10, INK);
+    y += 170;
+    if (lampbutton((Rectangle){x, y, 300, 70}, "START AT\nRATED POWER", L_WHT, !start_hot)) {
+        start_hot = 0;
+        go = 1;
+    }
+    if (lampbutton((Rectangle){x + 320, y, 300, 70}, "START FROM\nHOT SHUTDOWN", L_AMB, start_hot)) {
+        start_hot = 1;
+        go = 1;
+    }
+    y += 100;
+    dymo(x, y + 12, "RANDOM EQUIPMENT FAILURES");
+    if (lampbutton((Rectangle){x + 190, y, 70, 36}, "ON", L_RED, random_failures)) random_failures = 1;
+    if (lampbutton((Rectangle){x + 264, y, 70, 36}, "OFF", L_GRN, !random_failures)) random_failures = 0;
+    text("ESC QUITS", b.x + b.width - 100, b.y + b.height - 24, 10, INK);
+    EndDrawing();
+    return go;
 }
 
 int main(void)
@@ -936,31 +880,55 @@ int main(void)
     SetTargetFPS(60);
     P = calloc(1, sizeof *P);
     pthread_t th;
-    pthread_create(&th, NULL, loader, NULL);
     double acc = 0;
     int shot = getenv("RMELM_SCREENSHOT") != NULL;
     double shot_at = shot ? atof(getenv("RMELM_SCREENSHOT")) : 0;
+    /* RMELM_START=rated|hot skips the menu (screenshots, scripted runs) */
+    const char *st = getenv("RMELM_START");
+    int started = 0;
+    if (st || shot) {
+        start_hot = st && st[0] == 'h';
+        started = 1;
+    }
+    if (getenv("RMELM_FAILURES")) random_failures = atoi(getenv("RMELM_FAILURES"));
+    if (started) pthread_create(&th, NULL, loader, NULL);
     while (!WindowShouldClose()) {
+        if (!started) {
+            if (start_menu()) {
+                started = 1;
+                pthread_create(&th, NULL, loader, NULL);
+            }
+            continue;
+        }
         if (!loaded) {
             loading_screen();
             if (loaded) {
                 pthread_join(th, NULL);
                 number_rods();
-                logmsg("Unit at rated power, turbine on line");
-                logmsg("Click pumps on the mimic; rod controls at right");
+                rm_game_init(&G, P, (unsigned)time(NULL), random_failures);
+                msg_seen = P->nmsg;
+                if (start_hot) {
+                    logmsg("Unit in hot shutdown: all rods in, sodium at 380 C");
+                    logmsg("Withdraw SAFETY bank, then shims to criticality");
+                } else {
+                    logmsg("Unit at rated power, turbine on line");
+                    logmsg("Follow the load dispatcher's orders");
+                }
             }
             continue;
         }
         if (!paused) {
-            acc += GetFrameTime() * speed;
+            acc += GetFrameTime();
             int n = 0;
-            while (acc >= DT && n < 16 * speed) {
+            while (acc >= DT && n < 8) {
                 rm_plant_step(P, DT);
+                rm_game_step(&G, P, DT);
                 acc -= DT;
                 n++;
             }
             if (acc > 1.0) acc = 0;
         }
+        while (msg_seen < P->nmsg) logmsg("%s", P->msg[msg_seen++ % 16]);
         static double last = -1;
         if (P->t - last >= 0.5) {
             if (ntr < NTR) ntr++;
@@ -980,9 +948,7 @@ int main(void)
         ClearBackground(WALL);
         header();
         draw_reactor((Rectangle){6, 46, 420, 480});
-        if (IsKeyPressed(KEY_TAB)) show_rods = !show_rods;
-        if (show_rods) draw_rodselect((Rectangle){432, 46, 440, 480});
-        else draw_mimic((Rectangle){432, 46, 440, 480});
+        draw_rodselect((Rectangle){432, 46, 440, 480});
         draw_controls((Rectangle){878, 46, 396, 748});
         draw_annunciators((Rectangle){6, 532, 866, 124});
         draw_log((Rectangle){6, 662, 866, 132});

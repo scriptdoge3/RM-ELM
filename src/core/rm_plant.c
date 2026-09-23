@@ -3,6 +3,8 @@
 #include "rm_sodium.h"
 
 #include <math.h>
+#include <stdarg.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -27,6 +29,9 @@
 #define P_HOUSE0 45.0e6
 #define SG_TUBE_VOL 10.0     /* m3 water side per SG */
 #define G 9.80665
+#define NA_SEC_MASS 68600.0  /* kg of sodium in one secondary loop */
+#define SWR_HEAT 9.0e6       /* J per kg of water reacting with sodium */
+#define DISC_BURST_LEAK 2.0  /* kg/s: the pressure pulse bursts the rupture disc */
 
 static double W_T0 = 0.0;    /* nominal total steam flow, set at init */
 static double chan_share[1024], byp_share[1024];
@@ -158,6 +163,7 @@ static double sg_step(rm_sg *s, double Wna, double hna_in, double p, double hfw,
 {
     double w = Wna > 0 ? Wna : 0.0;
     double wf = s->isolated ? 0.0 : s->W_fw;
+    double dry = s->isolated ? 0.0 : 1.0;   /* blown-down tubes transfer no heat */
     double Ak = s->area / RM_HX_N;
     double hna_old[RM_HX_N], hw_old[RM_HX_N], Tw_old[RM_HX_N];
     memcpy(hna_old, s->hna, sizeof hna_old);
@@ -171,7 +177,7 @@ static double sg_step(rm_sg *s, double Wna, double hna_in, double p, double hfw,
     double Q = 0;
     for (int it = 0; it < 3; it++) {
         for (int k = 0; k < RM_HX_N; k++) {
-            double Gw = h_water_side(&st[k], wf / (W_T0 / RM_NLOOPS)) * Ak;
+            double Gw = dry * h_water_side(&st[k], wf / (W_T0 / RM_NLOOPS)) * Ak;
             double Tna = rm_na_T(s->hna[k]);
             s->Tw[k] = (s->mw_C / dt * Tw_old[k] + Gna * Tna + Gw * st[k].T) / (s->mw_C / dt + Gna + Gw);
         }
@@ -186,7 +192,7 @@ static double sg_step(rm_sg *s, double Wna, double hna_in, double p, double hfw,
         hup = hfw;
         Q = 0;
         for (int k = RM_HX_N - 1; k >= 0; k--) {
-            double Gw = h_water_side(&st[k], wf / (W_T0 / RM_NLOOPS)) * Ak;
+            double Gw = dry * h_water_side(&st[k], wf / (W_T0 / RM_NLOOPS)) * Ak;
             double M = st[k].rho * SG_TUBE_VOL / RM_HX_N;
             double cpw = st[k].region == 4 ? 1e9 : st[k].cp;
             s->hw[k] = (M / dt * hw_old[k] + wf * hup + Gw * (s->Tw[k] - st[k].T + hw_old[k] / cpw)) /
@@ -196,6 +202,8 @@ static double sg_step(rm_sg *s, double Wna, double hna_in, double p, double hfw,
         }
         for (int k = 0; k < RM_HX_N; k++) rm_if97_ph_sat(&sat, s->hw[k], &st[k]);
     }
+    /* sodium-water reaction heat goes into the sodium where the leak is */
+    if (s->leak > 0) s->hna[RM_HX_N / 2] += s->leak * SWR_HEAT * dt / s->mna;
     s->Q = Q;
     s->W_steam = wf;
     s->h_steam = s->hw[0];
@@ -223,6 +231,16 @@ static double pump_head(const rm_pump *p, double W)
     return dp0 * (1.25 * s * s - 0.25 * q * fabs(q));
 }
 
+void rm_plant_msg(rm_plant *p, const char *fmt, ...)
+{
+    char *m = p->msg[p->nmsg % 16];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(m, sizeof p->msg[0], fmt, ap);
+    va_end(ap);
+    p->nmsg++;
+}
+
 /* ---- init ---------------------------------------------------------------- */
 int rm_plant_init(rm_plant *p)
 {
@@ -246,7 +264,9 @@ int rm_plant_init(rm_plant *p)
         l->spump.speed = l->spump.speed_set = 1.0;
         l->spump.motor_on = 1;
         l->sg.W_fw = W_T0 / RM_NLOOPS;
+        l->sg.h2 = RM_H2_BACKGROUND;
     }
+    p->fw_on = 1;
     p->m_inplenum = 40000.0;
     p->m_outplenum = 200000.0;
     p->h_inplenum = rm_na_h(T_COLD0);
@@ -374,16 +394,30 @@ static void steam_side(rm_plant *p, double dt)
     if (bp_target < 0) bp_target = 0;
     if (bp_target > 1) bp_target = 1;
     p->bypass_valve += (bp_target - p->bypass_valve) * fmin(1.0, dt / 1.0);
+    /* feedwater: feedforward from reactor power (a quarter of it per loop,
+     * as design steam), trimmed to hold that loop's primary cold
+     * leg at 380 C. That keeps the core inlet at its design value at any
+     * power; steam temperature follows the sodium (~480 C at full power,
+     * lower at part load). An override adds feed if the steam runs hot. */
+    double hfw = rm_if97_h_pT(15.5e6, p->T_fw);
+    double hst0 = rm_if97_h_pT(P_STEAM0, T_STEAM0);
     for (int i = 0; i < RM_NLOOPS; i++) {
         rm_sg *s = &p->loop[i].sg;
-        if (p->auto_fw && !s->isolated) {
-            double e = (s->T_steam - p->T_steam_set) / 100.0;
-            p->fw_int[i] += e * dt;
-            s->fw_valve += (0.02 * e + 0.004 * p->fw_int[i] * 0.0) * dt * 10.0;
-            if (s->fw_valve < 0.02) s->fw_valve = 0.02;
+        if (p->auto_fw && p->fw_on && !s->isolated) {
+            double Tc = rm_na_T(p->loop[i].cold.h[RM_PIPE_N - 1]);
+            double e = (Tc - T_COLD0) / 100.0;
+            double es = (s->T_steam - p->T_steam_set - 15.0) / 100.0;
+            if (es > e) e = es;
+            p->fw_int[i] += 0.002 * e * dt;
+            if (p->fw_int[i] < -0.5) p->fw_int[i] = -0.5;
+            if (p->fw_int[i] > 1.0) p->fw_int[i] = 1.0;
+            double W = fmax(p->core.p_thermal, 0.0) / RM_NLOOPS / (hst0 - hfw) * (1.0 + p->fw_int[i] + 0.5 * e);
+            double target = W / (W_T0 / RM_NLOOPS) * 0.8 / fmax(p->fw_pump, 0.05);
+            s->fw_valve += (target - s->fw_valve) * fmin(1.0, dt / 2.0);
+            if (s->fw_valve < 0.0) s->fw_valve = 0.0;
             if (s->fw_valve > 1.3) s->fw_valve = 1.3;
         }
-        s->W_fw = s->isolated ? 0.0 : s->fw_valve / 0.8 * W_T0 / RM_NLOOPS * p->fw_pump;
+        s->W_fw = (s->isolated || !p->fw_on) ? 0.0 : s->fw_valve / 0.8 * W_T0 / RM_NLOOPS * p->fw_pump;
     }
 }
 
@@ -512,6 +546,52 @@ static void dracs_dampers(rm_plant *p, double dt)
     }
 }
 
+void rm_plant_isolate_sg(rm_plant *p, int i)
+{
+    rm_sg *s = &p->loop[i].sg;
+    if (s->isolated) return;
+    s->isolated = 1;
+    s->W_fw = 0.0;
+    rm_plant_msg(p, "SG %d ISOLATED, WATER SIDE BLOWN DOWN", i + 1);
+}
+
+static void trip(rm_plant *p, const char *why);
+
+/* Tube leaks feed water into the secondary sodium. The reaction makes
+ * hydrogen (picked up by the hydrogen meter) and heat, and the jet wastes
+ * neighbouring tubes, so the leak grows until the SG is isolated. A big leak
+ * bursts the sodium-side rupture disc: automatic isolation, the loop's
+ * sodium goes to the dump tank and the reactor trips. */
+static void sodium_water(rm_plant *p, double dt)
+{
+    for (int i = 0; i < RM_NLOOPS; i++) {
+        rm_loop *l = &p->loop[i];
+        rm_sg *s = &l->sg;
+        if (s->leak > 0) {
+            if (s->isolated) {
+                s->leak *= exp(-dt / 20.0);                 /* blowdown */
+                if (s->leak < 1e-7) s->leak = 0.0;
+            } else {
+                s->leak *= exp(dt * log(2.0) / 90.0);       /* self-wastage: doubles in 90 s */
+                if (s->leak > 30.0) s->leak = 30.0;
+            }
+            s->h2 += s->leak * (2.0 / 18.0) * dt / NA_SEC_MASS * 1e6;
+        }
+        /* cold trap takes hydrogen out slowly */
+        s->h2 -= (s->h2 - RM_H2_BACKGROUND) * dt / 10800.0;
+        if (!s->disc_burst && s->leak > DISC_BURST_LEAK) {
+            s->disc_burst = 1;
+            rm_plant_msg(p, "SG %d RUPTURE DISC BURST - SODIUM-WATER REACTION", i + 1);
+            rm_plant_isolate_sg(p, i);
+            l->spump.tripped = 1;
+            rm_plant_msg(p, "LOOP %d SECONDARY SODIUM DUMPED", i + 1);
+            char why[48];
+            snprintf(why, sizeof why, "SODIUM-WATER REACTION SG %d", i + 1);
+            trip(p, why);
+        }
+    }
+}
+
 static void trip(rm_plant *p, const char *why)
 {
     rm_core *c = &p->core;
@@ -549,6 +629,7 @@ static void protection(rm_plant *p)
 
 void rm_plant_step(rm_plant *p, double dt)
 {
+    sodium_water(p, dt);
     for (int i = 0; i < RM_NLOOPS; i++) {
         rm_loop *l = &p->loop[i];
         int ess = rm_plant_essential_power(p);
@@ -556,15 +637,32 @@ void rm_plant_step(rm_plant *p, double dt)
         pump_step(&l->spump, dt, p->offsite_power, ess);
         l->Ws = W_S0 * fmax(l->spump.speed, 0.02);
     }
-    /* automatic rod control: regulating bank drives against the power
-     * error with a 1% deadband, never while tripped */
+    /* automatic rod control: the regulating bank steers the reactor period.
+     * Well below demand it raises power on a period no shorter than ~60 s
+     * (a startup-rate limit, so it can also take the reactor up from the
+     * source range); above demand it inserts; near demand it drives the
+     * period back to infinity. Never while tripped. */
     rm_core *c = &p->core;
     if (p->auto_rod && !c->scram) {
-        double err = c->p_thermal / RM_P_RATED - p->power_set;
-        double pos = rm_core_bank_pos(c, BANK_REG);
-        if (err > 0.005) rm_core_bank_move(c, BANK_REG, pos + 2.0);
-        else if (err < -0.005) rm_core_bank_move(c, BANK_REG, pos - 2.0);
-        else rm_core_bank_move(c, BANK_REG, pos);
+        double pw = c->p_thermal / RM_P_RATED + 1e-12;
+        double rel = pw / fmax(p->power_set, 1e-6);
+        double per = p->period;
+        int rising = isfinite(per) && per > 0, falling = isfinite(per) && per < 0;
+        double pos = rm_core_bank_pos(c, BANK_REG), step = 0.0;
+        if (rel < 0.97) {
+            if (rising && per < 45.0) step = 0.5;                       /* too fast: ease in */
+            else if (!rising || per > 90.0) step = -1.0;                /* withdraw */
+        } else if (rel > 1.03) {
+            if (!(falling && per > -60.0)) step = 1.0;                  /* insert */
+        } else if (rel > 1.005) {
+            if (!(falling && per > -300.0)) step = 0.3;
+        } else if (rel < 0.995) {
+            if (!(rising && per < 300.0)) step = -0.3;
+        } else {
+            if (rising && per < 600.0) step = 0.3;
+            else if (falling && per > -600.0) step = -0.3;
+        }
+        rm_core_bank_move(c, BANK_REG, pos + step);
     }
     electrical(p, dt);
     dracs_dampers(p, dt);
@@ -606,4 +704,64 @@ void rm_plant_steady(rm_plant *p)
         plant_thermal(p, 0.25, 0);
         steam_side(p, 0.25);
     }
+}
+
+void rm_plant_hot_standby(rm_plant *p)
+{
+    rm_core *c = &p->core;
+    /* flows, orificing and cross sections come from the rated-power solve */
+    rm_core_steady(c, 1.0, 1, 1);
+    double wt = 0;
+    for (int ch = 0; ch < c->nchan; ch++) wt += c->th.W[ch] + c->th.W_byp[ch];
+    for (int ch = 0; ch < c->nchan && ch < 1024; ch++) {
+        chan_share[ch] = c->th.W[ch] / wt;
+        byp_share[ch] = c->th.W_byp[ch] / wt;
+    }
+    const double T = T_COLD0;
+    rm_core_shutdown(c, T);
+    double hna = rm_na_h(T);
+    double hst = rm_if97_h_pT(P_STEAM0, T);
+    for (int i = 0; i < RM_NLOOPS; i++) {
+        rm_loop *l = &p->loop[i];
+        pipe_init(&l->hot, 10400.0, 20000.0, T);
+        pipe_init(&l->cold, 15000.0, 30000.0, T);
+        pipe_init(&l->shot, 16800.0, 30000.0, T);
+        pipe_init(&l->scold, 16800.0, 30000.0, T);
+        for (int k = 0; k < RM_HX_N; k++) {
+            l->ihx.hp[k] = l->ihx.hs[k] = hna;
+            l->ihx.Tw[k] = T;
+            l->sg.hna[k] = hna;
+            l->sg.hw[k] = hst;
+            l->sg.Tw[k] = T;
+        }
+        l->sg.W_fw = l->sg.W_steam = 0.0;
+        l->sg.fw_valve = 0.02;
+        l->sg.T_steam = T;
+        l->sg.h_steam = hst;
+    }
+    p->h_inplenum = p->h_outplenum = hna;
+    p->T_core_in = p->T_core_out = T;
+    p->fw_on = 0;
+    p->turbine_tripped = 1;
+    p->generator_breaker = 0;
+    p->turbine_valve = 0.0;
+    p->bypass_valve = 0.0;
+    p->tv_int = 0.0;
+    p->p_header = P_STEAM0;
+    p->h_header = hst;
+    rm_if97_state st;
+    rm_if97_ph(P_STEAM0, hst, &st);
+    p->m_header = st.rho * V_HEADER;
+    p->T_fw = 423.15;
+    p->auto_rod = 0;
+    p->power_set = 0.05;
+    p->first_out[0] = 0;
+    p->period = INFINITY;
+    /* settle the loops (no fission power to speak of) */
+    for (int it = 0; it < 200; it++) {
+        hydraulics(p, 0.5);
+        plant_thermal(p, 0.5, 0);
+        steam_side(p, 0.5);
+    }
+    p->n_last = c->pks.n;
 }

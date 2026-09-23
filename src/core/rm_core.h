@@ -102,6 +102,11 @@ double rm_core_steady(rm_core *c, double power_frac, int iterate_th, int with_xe
 
 void rm_core_step(rm_core *c, double dt);
 
+/* Long-shutdown state after rm_core_steady has set up flows and cross
+ * sections: every rod in, isothermal at T, xenon and iodine decayed away,
+ * no decay heat, neutron level at the source-driven subcritical value. */
+void rm_core_shutdown(rm_core *c, double T);
+
 /* Rod control helpers */
 void rm_core_bank_move(rm_core *c, int bank, double target_cm);
 /* shift every rod of a bank by d cm, keeping individual offsets */

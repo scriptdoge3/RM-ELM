@@ -164,7 +164,8 @@ int rm_core_init(rm_core *c)
     c->pk.Lambda = rm_xs_Lambda;
     c->pks.n = 1e-9;
     for (int i = 0; i < 6; i++) c->pks.y[i] = c->pk.beta[i] * c->pks.n / c->pk.lambda[i];
-    c->src = 2e-8;
+    /* startup source: ~1e-9 of rated power at 5% subcritical (n = -S Lambda / rho) */
+    c->src = 5e-5;
     c->rho_doppler_coef = -2.5e-5;
     /* fuel heat capacity */
     double vol_fuel = c->nchan * geo.n_fuel_pins * PI * geo.pellet_r * geo.pellet_r * RM_ACTIVE_H / 100.0;
@@ -573,6 +574,37 @@ double rm_core_steady(rm_core *c, double power_frac, int iterate_th, int with_xe
     c->rho = rm_diff_reactivity(&c->dif);
     c->t_adjoint = c->t_doppler = c->t;
     return pos;
+}
+
+void rm_core_shutdown(rm_core *c, double T)
+{
+    for (int k = 0; k < c->nctrl; k++) {
+        c->rod_ins[k] = c->rod_target[k] = RM_ACTIVE_H;
+        c->rod_vel[k] = 0.0;
+    }
+    c->scram = 0;
+    rm_coreth_isothermal(&c->th, T);
+    size_t nf = (size_t)c->nchan * RM_NZ_ACT;
+    for (size_t n = 0; n < nf; n++) {
+        c->iso[ISO_I135][n] = c->iso[ISO_XE135][n] = 0.0;
+        c->iso[ISO_SM149][n] += c->iso[ISO_PM149][n];
+        c->iso[ISO_PM149][n] = 0.0;
+        c->iso[ISO_U233][n] += c->iso[ISO_PA233][n];
+        c->iso[ISO_PA233][n] = 0.0;
+    }
+    for (int i = 0; i < RM_NDH; i++) c->dh[i] = 0.0;
+    eigen(c, 400);
+    for (int i = 0; i < 200; i++) rm_diff_adjoint(&c->dif, 1, 2, 1.4);
+    c->rho = rm_diff_reactivity(&c->dif);
+    /* source-driven equilibrium: rho n / Lambda + S = 0 */
+    double n = c->rho < -1e-5 ? -c->src * c->pk.Lambda / c->rho : 1e-9;
+    c->pks.n = n;
+    for (int i = 0; i < 6; i++) c->pks.y[i] = c->pk.beta[i] * n / c->pk.lambda[i];
+    c->p_fission = n * RM_P_RATED * (1.0 - dh_total());
+    c->p_decay = 0.0;
+    c->p_thermal = c->p_fission;
+    distribute_power(c, c->p_thermal, c->p_fission);
+    c->t_adjoint = c->t_doppler = c->t;
 }
 
 void rm_core_step(rm_core *c, double dt)

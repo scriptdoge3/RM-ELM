@@ -49,7 +49,11 @@ typedef struct {
     double T_steam, h_steam;  /* outlet */
     double Q;
     double fw_valve;          /* 0..1 */
-    int isolated;
+    int isolated;             /* feed and steam valves shut, water side blown down */
+    /* sodium-water reaction */
+    double leak;              /* water/steam leaking into the sodium, kg/s */
+    double h2;                /* hydrogen in the secondary sodium, ppm (hydrogen meter) */
+    int disc_burst;           /* sodium-side rupture disc has gone */
 } rm_sg;
 
 typedef struct {
@@ -112,6 +116,7 @@ typedef struct {
     int diesel_running[3];
     double diesel_timer;      /* s since loss of offsite power */
     double fw_pump;           /* feedwater pump speed 0..1 (motor driven) */
+    int fw_on;                /* feedwater system in service */
     double cw_pump;           /* circulating water pump speed 0..1 */
 
     /* decay heat removal: three natural-draft sodium-to-air coolers */
@@ -129,6 +134,10 @@ typedef struct {
     double period;            /* reactor period estimate, s */
     double n_last;
 
+    /* event messages for the operator (ring buffer, nmsg counts all ever posted) */
+    char msg[16][72];
+    unsigned nmsg;
+
     double t;
 } rm_plant;
 
@@ -142,6 +151,16 @@ void rm_plant_free(rm_plant *p);
 void rm_plant_steady(rm_plant *p);
 void rm_plant_step(rm_plant *p, double dt);
 void rm_plant_manual_scram(rm_plant *p);
+/* Start from hot shutdown instead: every rod in, sodium isothermal at 380 C
+ * with the pumps running, feedwater off, turbine tripped. */
+void rm_plant_hot_standby(rm_plant *p);
+/* Shut an SG's feed and steam isolation valves and blow its water side down. */
+void rm_plant_isolate_sg(rm_plant *p, int loop);
+/* Post an operator message. */
+void rm_plant_msg(rm_plant *p, const char *fmt, ...);
+/* Thresholds shown on the panels */
+#define RM_H2_ALARM 0.30      /* ppm, hydrogen-in-sodium high */
+#define RM_H2_BACKGROUND 0.08
 
 double rm_na_T_of_h(double h);
 
