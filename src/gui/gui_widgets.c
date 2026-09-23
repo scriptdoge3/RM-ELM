@@ -109,7 +109,7 @@ void ctext(const char *s, float cx, float y, int size, Color c)
 void screw(float x, float y)
 {
     DrawCircleV((Vector2){x, y}, 4, (Color){128, 138, 130, 255});
-    DrawCircleLinesV((Vector2){x, y}, 4, INK);
+    DrawRing((Vector2){x, y}, 3.4f, 4.4f, 0, 360, 48, INK);
     DrawLineEx((Vector2){x - 3, y + 2}, (Vector2){x + 3, y - 2}, 1, INK);
 }
 
@@ -280,8 +280,8 @@ void meterl(Rectangle r, const char *label, double v, double lo, double hi, doub
     float R = fminf(f.width * 0.55f, f.height * 0.74f);
     Vector2 c = {f.x + f.width / 2, f.y + 10 + R};
     if (red_hi > red_lo)
-        DrawRing(c, R - 7, R, meter_ang(red_lo, lo, hi), meter_ang(red_hi, lo, hi), 24, (Color){210, 40, 30, 255});
-    DrawRing(c, R - 1.2f, R, -145, -35, 48, INK);
+        DrawRing(c, R - 7, R, meter_ang(red_lo, lo, hi), meter_ang(red_hi, lo, hi), 48, (Color){210, 40, 30, 255});
+    DrawRing(c, R - 1.2f, R, -145, -35, 96, INK);
     int nmin = nmaj * 5;
     for (int i = 0; i <= nmin; i++) {
         float a = (float)((-145.0 + 110.0 * i / nmin) * DEG2RAD);
@@ -318,9 +318,9 @@ void dial(Rectangle r, const char *label, double v, double lo, double hi, int nm
     const float a0 = 145, a1 = 395;
 #define DA(val) (a0 + (a1 - a0) * (float)fmin(1.02, fmax(-0.02, ((val) - lo) / (hi - lo))))
     float Rs = R - 6;
-    if (g_hi > g_lo) DrawRing(c, Rs - 6, Rs, DA(g_lo), DA(g_hi), 24, (Color){60, 160, 70, 255});
-    if (r_hi > r_lo) DrawRing(c, Rs - 6, Rs, DA(r_lo), DA(r_hi), 24, (Color){210, 40, 30, 255});
-    DrawRing(c, Rs - 0.8f, Rs + 0.4f, a0, a1, 48, INK);
+    if (g_hi > g_lo) DrawRing(c, Rs - 6, Rs, DA(g_lo), DA(g_hi), 48, (Color){60, 160, 70, 255});
+    if (r_hi > r_lo) DrawRing(c, Rs - 6, Rs, DA(r_lo), DA(r_hi), 48, (Color){210, 40, 30, 255});
+    DrawRing(c, Rs - 0.8f, Rs + 0.4f, a0, a1, 96, INK);
     int nmin = nmaj * 5;
     for (int i = 0; i <= nmin; i++) {
         float a = (a0 + (a1 - a0) * i / nmin) * DEG2RAD;
@@ -495,7 +495,7 @@ int rotary(Vector2 c, float rad, int n, const char *const *leg, int cur, float a
     /* knob: black bakelite bar knob with a white line */
     DrawCircleV((Vector2){c.x + 2, c.y + 3}, rad, alpha(BLACK, 90));
     DrawCircleV(c, rad, (Color){24, 24, 22, 255});
-    DrawRing(c, rad - 3, rad, 0, 360, 36, (Color){70, 70, 66, 255});
+    DrawRing(c, rad - 3, rad, 0, 360, 72, (Color){70, 70, 66, 255});
     float a = (a0 + (a1 - a0) * cur / (n - 1)) * DEG2RAD;
     Vector2 d = {cosf(a), sinf(a)};
     DrawLineEx((Vector2){c.x - d.x * rad * 0.9f, c.y - d.y * rad * 0.9f}, (Vector2){c.x + d.x * rad * 0.9f, c.y + d.y * rad * 0.9f},
@@ -532,7 +532,7 @@ int cswitch3(float cx, float y, const char *name, const char *ll, const char *rl
     /* square escutcheon with four screws and the engraved positions */
     Rectangle e = {cx - 40, y + 38, 80, 58};
     DrawRectangleRounded(e, 0.12f, 4, (Color){24, 24, 22, 255});
-    DrawRectangleRoundedLines(e, 0.12f, 4, (Color){92, 92, 86, 255});
+    DrawRectangleRoundedLinesEx(e, 0.12f, 4, 1.2f, (Color){92, 92, 86, 255});
     for (int k = 0; k < 4; k++)
         DrawCircleV((Vector2){e.x + (k & 1 ? e.width - 5 : 5), e.y + (k & 2 ? e.height - 5 : 24)}, 2.0f, (Color){120, 120, 114, 255});
     Color eng = {226, 224, 214, 255};
@@ -560,7 +560,7 @@ int cswitch3(float cx, float y, const char *name, const char *ll, const char *rl
     }
     int locked = ptl && *ptl;
     if (locked) side = -1;
-    if (hv) DrawRectangleRoundedLines(e, 0.12f, 4, (Color){200, 200, 190, 255});
+    if (hv) DrawRectangleRoundedLinesEx(e, 0.12f, 4, 1.2f, (Color){200, 200, 190, 255});
 
     /* handle */
     Vector2 hc = {cx, e.y + 34};
@@ -616,7 +616,7 @@ int keysw(float cx, float cy, const char *l0, const char *l1, int state)
     DrawLineEx((Vector2){cx - d.x * 7, cy - d.y * 7}, (Vector2){cx + d.x * 7, cy + d.y * 7}, 3, (Color){60, 50, 30, 255});
     DrawCircleV((Vector2){cx + d.x * 12, cy + d.y * 12}, 5, (Color){210, 210, 200, 255});
     int hv = input_ok && CheckCollisionPointCircle(m, c, 14);
-    if (hv) DrawCircleLinesV(c, 15, WHITE);
+    if (hv) DrawRing(c, 14.4f, 15.6f, 0, 360, 72, WHITE);
     return hv && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 }
 
@@ -627,12 +627,12 @@ int pbround(Vector2 c, float r, const char *label, Color cap, Color collar, int 
     int hv = input_ok && CheckCollisionPointCircle(m, c, r + 4);
     int dn = hv && IsMouseButtonDown(MOUSE_BUTTON_LEFT);
     DrawCircleV(c, r + 6, collar);
-    DrawRing(c, r + 5, r + 6.5f, 0, 360, 32, BEZEL);
+    DrawRing(c, r + 5, r + 6.5f, 0, 360, 64, BEZEL);
     DrawCircleV((Vector2){c.x + 1.5f, c.y + 2}, r, alpha(BLACK, 90));
     Color k = lit ? cap : (cap.r + cap.g + cap.b > 500 ? mixc(cap, (Color){120, 120, 116, 255}, 0.4f) : cap);
     DrawCircleV(c, dn ? r - 2 : r, dn ? mixc(k, BLACK, 0.25f) : k);
     DrawCircleV((Vector2){c.x - r * 0.3f, c.y - r * 0.35f}, r * 0.3f, alpha(WHITE, lit ? 150 : 50));
-    if (hv) DrawCircleLinesV(c, r + 7, (Color){220, 220, 210, 255});
+    if (hv) DrawRing(c, r + 6.4f, r + 7.6f, 0, 360, 72, (Color){220, 220, 210, 255});
     if (label) {
         const char *nl = strchr(label, '\n');
         if (nl) {
@@ -681,7 +681,7 @@ int mastation(Rectangle r, const char *name, const char *unit, double pv, double
     if (name) tag_c(r.x + r.width / 2, r.y, name);
     Rectangle b = {r.x, r.y + 16, r.width, r.height - 16};
     DrawRectangleRounded(b, 0.06f, 4, (Color){54, 56, 54, 255});
-    DrawRectangleRoundedLines(b, 0.06f, 4, BEZEL);
+    DrawRectangleRoundedLinesEx(b, 0.06f, 4, 1.2f, BEZEL);
     /* process indicator with the setpoint index */
     Rectangle s = {b.x + 8, b.y + 8, 36, 90};
     DrawRectangleRec((Rectangle){s.x - 2, s.y - 2, s.width + 4, s.height + 4}, BEZEL);
@@ -836,7 +836,7 @@ void sym_hx(Rectangle r, Color a, Color b, const char *name)
 void sym_tank(Rectangle r, Color col, const char *name)
 {
     DrawRectangleRounded(r, 0.4f, 6, (Color){36, 36, 34, 255});
-    DrawRectangleRoundedLines(r, 0.4f, 6, col);
+    DrawRectangleRoundedLinesEx(r, 0.4f, 6, 1.5f, col);
     if (name) ctext(name, r.x + r.width / 2, r.y + r.height / 2 - 5, 10, (Color){220, 220, 210, 255});
 }
 
@@ -851,8 +851,8 @@ void sym_xfmr(Vector2 p, Color col, int vertical)
 {
     Vector2 a = vertical ? (Vector2){p.x, p.y - 8} : (Vector2){p.x - 8, p.y};
     Vector2 b = vertical ? (Vector2){p.x, p.y + 8} : (Vector2){p.x + 8, p.y};
-    DrawRing(a, 9, 12, 0, 360, 24, col);
-    DrawRing(b, 9, 12, 0, 360, 24, col);
+    DrawRing(a, 9, 12, 0, 360, 48, col);
+    DrawRing(b, 9, 12, 0, 360, 48, col);
 }
 
 /* the black tape boxes round groups of controls */

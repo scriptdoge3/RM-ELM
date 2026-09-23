@@ -293,8 +293,13 @@ int main(void)
     SetExitKey(KEY_NULL);
     SetTargetFPS(60);
     if (!getenv("RMELM_MUTE")) ann_init_audio();
-    RenderTexture2D canvas = LoadRenderTexture(CW, CH);
-    SetTextureFilter(canvas.texture, TEXTURE_FILTER_BILINEAR);
+    /* the canvas is re-made whenever the window size changes */
+    RenderTexture2D canvas = {0};
+    int cv_w = 0, cv_h = 0;
+    /* supersampling: draw at twice the display resolution and filter down
+     * (RMELM_SUPERSAMPLE=1 turns it off on a slow machine) */
+    float ss = getenv("RMELM_SUPERSAMPLE") ? (float)atof(getenv("RMELM_SUPERSAMPLE")) : 2.0f;
+    if (!(ss >= 1.0f)) ss = 1.0f;
     P = calloc(1, sizeof *P);
     pthread_t th;
     double acc = 0;
@@ -330,6 +335,18 @@ int main(void)
         float ox = (sw - CW * sc) / 2, oy = (sh - CH * sc) / 2;
         SetMouseOffset((int)-ox, (int)-oy);
         SetMouseScale(1.0f / sc, 1.0f / sc);
+        /* draw the boards at the display's own resolution (times the
+         * supersampling), not at 1920x1080 stretched to fit */
+        float zs = fminf(sc * ss, 4096.0f / CW);
+        int tex_w = (int)lroundf(CW * zs), tex_h = (int)lroundf(CH * zs);
+        if (tex_w != cv_w || tex_h != cv_h) {
+            if (cv_w) UnloadRenderTexture(canvas);
+            canvas = LoadRenderTexture(tex_w, tex_h);
+            SetTextureFilter(canvas.texture, TEXTURE_FILTER_BILINEAR);
+            cv_w = tex_w;
+            cv_h = tex_h;
+            gui_font_load(zs);
+        }
 
         if (started && loaded && !ready) {
             ready = 1;
@@ -379,6 +396,7 @@ int main(void)
         }
 
         BeginTextureMode(canvas);
+        BeginMode2D((Camera2D){.zoom = (float)tex_w / CW});
         if (!started) {
             if (start_menu()) {
                 started = 1;
@@ -389,10 +407,11 @@ int main(void)
         } else {
             draw_board();
         }
+        EndMode2D();
         EndTextureMode();
         BeginDrawing();
         ClearBackground(BLACK);
-        DrawTexturePro(canvas.texture, (Rectangle){0, 0, CW, -CH}, (Rectangle){ox, oy, CW * sc, CH * sc},
+        DrawTexturePro(canvas.texture, (Rectangle){0, 0, (float)tex_w, (float)-tex_h}, (Rectangle){ox, oy, CW * sc, CH * sc},
                        (Vector2){0, 0}, 0, WHITE);
         EndDrawing();
 
@@ -404,7 +423,8 @@ int main(void)
             break;
         }
     }
-    UnloadRenderTexture(canvas);
+    if (cv_w) UnloadRenderTexture(canvas);
+    gui_font_unload();
     if (IsAudioDeviceReady()) CloseAudioDevice();
     CloseWindow();
     return 0;

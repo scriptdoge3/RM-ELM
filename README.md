@@ -43,9 +43,11 @@ air and gas, black electrical). Engraved nameplates, black demarcation tape
 round groups of controls, and blue label tape where the operators added their
 own notes. An alarm typer runs along the front of every board.
 
-Each board is laid out on a 1920x1080 canvas and scaled to your display,
-borderless full screen (F11 toggles it; `RMELM_WINDOWED=1` starts in a
-window). At launch you pick **start at rated power** or **start from hot
+Each board is laid out on a 1920x1080 canvas but drawn at your display's own
+resolution (sharp on 1440p and 4K screens), with 2x supersampling for smooth
+edges; `RMELM_SUPERSAMPLE=1` turns that off on a slow machine. The lettering
+is DejaVu Sans Bold, compiled in. It runs borderless full screen (F11 toggles
+it; `RMELM_WINDOWED=1` starts in a window). At launch you pick **start at rated power** or **start from hot
 shutdown**, and whether random equipment failures are on. The sim runs in real
 time. HOLD pauses it, and F12 saves a screenshot (`screenshotNNN.png`).
 

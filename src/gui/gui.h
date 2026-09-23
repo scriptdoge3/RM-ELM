@@ -19,7 +19,19 @@
 #include "rm_plant.h"
 #include "rm_sodium.h"
 
-/* the boards are drawn on a fixed canvas and scaled to fill the screen */
+/* panel lettering (gui_font.c): a TrueType face rasterised for the display's
+ * real resolution, condensed to the width raylib's built-in font would take,
+ * so every layout measured with MeasureText still fits. All DrawText calls in
+ * the GUI go through it. */
+void gui_font_load(float scale);
+void gui_font_unload(void);
+void gui_text(const char *s, int x, int y, int size, Color c);
+#ifndef GUI_FONT_IMPL
+#define DrawText(s, x, y, size, c) gui_text(s, x, y, size, c)
+#endif
+
+/* the boards are laid out on a fixed 1920x1080 canvas, drawn at the display's
+ * own resolution through a 2D camera */
 #define CW 1920
 #define CH 1080
 #define DT 0.05

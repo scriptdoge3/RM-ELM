@@ -383,7 +383,7 @@ static void turb_bench(Rectangle bb)
     Vector2 sh[2] = {{bb.x + 230, my}, {bb.x + 240, my}};
     mimic_poly(sh, 2, 6, INK);
     DrawCircleV((Vector2){bb.x + 252, my}, 12, (Color){60, 64, 60, 255});
-    DrawCircleLinesV((Vector2){bb.x + 252, my}, 12, INK);
+    DrawRing((Vector2){bb.x + 252, my}, 11.2f, 12.4f, 0, 360, 72, INK);
     ctext("G", bb.x + 252, my - 5, 10, (Color){230, 230, 220, 255});
     Vector2 ex2[2] = {{bb.x + 200, my + 22}, {bb.x + 200, my + 44}};
     mpipe(ex2, 2, MIM_STM, 6, 0);
@@ -431,7 +431,7 @@ static void synchroscope(Vector2 c, float R)
         DrawLineEx((Vector2){c.x + R * sinf(a), c.y - R * cosf(a)}, (Vector2){c.x + (R - l) * sinf(a), c.y - (R - l) * cosf(a)},
                    1.5f, INK);
     }
-    DrawRing(c, R - 12, R - 4, -100, -80, 8, (Color){40, 150, 60, 255});
+    DrawRing(c, R - 12, R - 4, -100, -80, 16, (Color){40, 150, 60, 255});
     ctext("SLOW", c.x - R * 0.55f, c.y + 8, 10, INK);
     ctext("FAST", c.x + R * 0.55f, c.y + 8, 10, INK);
     ctext("SYNCHROSCOPE", c.x, c.y + R * 0.45f, 10, INK);

@@ -148,7 +148,7 @@ static void small_gauge(Vector2 c, float R, double f, int alarm)
     DrawCircleV(c, R - 2.5f, FACE);
     const float a0 = 150, a1 = 390;
     float fa = (float)((FUEL_ALARM - FUEL_LO) / (FUEL_HI - FUEL_LO));
-    DrawRing(c, R - 6, R - 3, a0 + (a1 - a0) * fa, a1, 8, (Color){210, 40, 30, 255});
+    DrawRing(c, R - 6, R - 3, a0 + (a1 - a0) * fa, a1, 16, (Color){210, 40, 30, 255});
     for (int i = 0; i <= 6; i++) {
         float a = (a0 + (a1 - a0) * i / 6) * DEG2RAD;
         DrawLineEx((Vector2){c.x + (R - 3) * cosf(a), c.y + (R - 3) * sinf(a)},
