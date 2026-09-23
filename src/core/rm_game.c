@@ -88,8 +88,8 @@ static void failure(rm_game *g, rm_plant *p)
             return;
         }
     } else if (r < 0.88) {
-        if (p->offsite_power) {
-            p->offsite_power = 0;
+        if (p->grid_ok) {
+            p->grid_ok = 0;
             g->grid_back_at = p->t + 600.0 + 1200.0 * urand(g);
             rm_plant_msg(p, "GRID FAULT - OFFSITE POWER LOST");
             return;
@@ -164,7 +164,7 @@ void rm_game_step(rm_game *g, rm_plant *p, double dt)
     /* repairs */
     if (g->grid_back_at > 0 && t >= g->grid_back_at) {
         g->grid_back_at = 0;
-        p->offsite_power = 1;
+        p->grid_ok = 1;
         rm_plant_msg(p, "GRID RESTORED - OFFSITE POWER AVAILABLE");
     }
     for (int d = 0; d < 3; d++)

@@ -265,6 +265,7 @@ int rm_plant_init(rm_plant *p)
         l->spump.motor_on = 1;
         l->sg.W_fw = W_T0 / RM_NLOOPS;
         l->sg.h2 = RM_H2_BACKGROUND;
+        l->sg.fiv_open = l->sg.msiv_open = 1;
     }
     p->fw_on = 1;
     p->m_inplenum = 40000.0;
@@ -284,7 +285,7 @@ int rm_plant_init(rm_plant *p)
     p->auto_fw = p->auto_turbine = 1;
     p->auto_rod = 1;
     p->power_set = 1.0;
-    p->offsite_power = 1;
+    p->offsite_power = p->grid_ok = p->grid_breaker = 1;
     for (int i = 0; i < 3; i++) p->diesel_avail[i] = 1;
     p->fw_pump = 1.0;
     p->cw_pump = 1.0;
@@ -403,7 +404,8 @@ static void steam_side(rm_plant *p, double dt)
     double hst0 = rm_if97_h_pT(P_STEAM0, T_STEAM0);
     for (int i = 0; i < RM_NLOOPS; i++) {
         rm_sg *s = &p->loop[i].sg;
-        if (p->auto_fw && p->fw_on && !s->isolated) {
+        int path = !s->isolated && s->fiv_open && s->msiv_open;
+        if (p->auto_fw && p->fw_on && path) {
             double Tc = rm_na_T(p->loop[i].cold.h[RM_PIPE_N - 1]);
             double e = (Tc - T_COLD0) / 100.0;
             double es = (s->T_steam - p->T_steam_set - 15.0) / 100.0;
@@ -417,7 +419,7 @@ static void steam_side(rm_plant *p, double dt)
             if (s->fw_valve < 0.0) s->fw_valve = 0.0;
             if (s->fw_valve > 1.3) s->fw_valve = 1.3;
         }
-        s->W_fw = (s->isolated || !p->fw_on) ? 0.0 : s->fw_valve / 0.8 * W_T0 / RM_NLOOPS * p->fw_pump;
+        s->W_fw = (!path || !p->fw_on) ? 0.0 : s->fw_valve / 0.8 * W_T0 / RM_NLOOPS * p->fw_pump;
     }
 }
 
@@ -482,6 +484,11 @@ static void plant_thermal(rm_plant *p, double dt, int with_neutronics)
     double qmax = p->W_dracs * (p->h_outplenum - hmin);
     if (Q > qmax) Q = qmax > 0 ? qmax : 0;
     p->Q_dracs = Q;
+    {
+        double tot = 0;
+        for (int i = 0; i < 3; i++) tot += p->dracs_damper[i];
+        for (int i = 0; i < 3; i++) p->Q_dracs_train[i] = tot > 1e-9 ? Q * p->dracs_damper[i] / tot : 0.0;
+    }
     /* the column inside the coolers: even stagnant sodium there is chilled
      * through an open damper, which is what starts the flow */
     double Weff = p->W_dracs > 60.0 ? p->W_dracs : 60.0;
@@ -514,14 +521,16 @@ int rm_plant_essential_power(const rm_plant *p)
 
 static void electrical(rm_plant *p, double dt)
 {
-    if (p->offsite_power) {
-        p->diesel_timer = 0;
-        for (int i = 0; i < 3; i++) p->diesel_running[i] = 0;
-    } else {
-        p->diesel_timer += dt;
-        /* start on undervoltage, up to speed and loaded after 10 s */
-        for (int i = 0; i < 3; i++)
-            p->diesel_running[i] = p->diesel_avail[i] && p->diesel_timer > 10.0;
+    p->offsite_power = p->grid_ok && p->grid_breaker;
+    p->diesel_timer = p->offsite_power ? 0.0 : p->diesel_timer + dt;
+    /* each diesel starts on bus undervoltage (or by hand) and is up to speed
+     * and loaded 10 s later */
+    for (int i = 0; i < 3; i++) {
+        int called = !p->offsite_power || p->diesel_manual[i];
+        p->diesel_t[i] = (called && p->diesel_avail[i]) ? p->diesel_t[i] + dt : 0.0;
+        p->diesel_running[i] = p->diesel_t[i] > 10.0;
+    }
+    if (!p->offsite_power) {
         /* the main generator can't hold the grid on its own here */
         p->turbine_tripped = 1;
         p->generator_breaker = 0;
@@ -551,6 +560,7 @@ void rm_plant_isolate_sg(rm_plant *p, int i)
     rm_sg *s = &p->loop[i].sg;
     if (s->isolated) return;
     s->isolated = 1;
+    s->fiv_open = s->msiv_open = 0;
     s->W_fw = 0.0;
     rm_plant_msg(p, "SG %d ISOLATED, WATER SIDE BLOWN DOWN", i + 1);
 }
@@ -577,8 +587,8 @@ static void sodium_water(rm_plant *p, double dt)
             }
             s->h2 += s->leak * (2.0 / 18.0) * dt / NA_SEC_MASS * 1e6;
         }
-        /* cold trap takes hydrogen out slowly */
-        s->h2 -= (s->h2 - RM_H2_BACKGROUND) * dt / 10800.0;
+        /* cold trap takes hydrogen out slowly (its lines close on containment isolation) */
+        if (!p->containment_isolated) s->h2 -= (s->h2 - RM_H2_BACKGROUND) * dt / 10800.0;
         if (!s->disc_burst && s->leak > DISC_BURST_LEAK) {
             s->disc_burst = 1;
             rm_plant_msg(p, "SG %d RUPTURE DISC BURST - SODIUM-WATER REACTION", i + 1);

@@ -96,7 +96,7 @@ int main(void)
                                  : "loss of offsite power (diesels start, pony motors, DRACS)");
         rm_plant_init(p);
         rm_plant_steady(p);
-        p->offsite_power = 0;
+        p->grid_ok = 0;
         if (sbo) for (int i = 0; i < 3; i++) p->diesel_avail[i] = 0;
         peak_clad = 0;
         double peak_out = 0;

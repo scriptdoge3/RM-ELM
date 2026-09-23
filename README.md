@@ -31,10 +31,12 @@ used. Force C with `-DRMELM_USE_ASM=OFF`.
 
 ![RM-ELM control room at full power](docs/gui.png)
 
-A point-and-click main control board drawn in 1978 style. At launch you pick
-**start at rated power** or **start from hot shutdown**, and whether random
-equipment failures are on. The sim runs in real time; HOLD pauses it and F12
-saves a screenshot.
+A point-and-click main control board drawn in 1978 style. It fills the
+screen: the board is laid out on a 1920x1080 canvas and scaled to your
+display, borderless full screen (F11 toggles it; `RMELM_WINDOWED=1` starts
+in a window). At launch you pick **start at rated power** or **start from
+hot shutdown**, and whether random equipment failures are on. The sim runs
+in real time; HOLD pauses it and F12 saves a screenshot.
 
 ### The job
 
@@ -57,27 +59,59 @@ Equipment fails at random (about one event every 20 minutes at power):
 
 ### Boards
 
+The top row is the reactor:
+
 - **Reactor**: strip-chart recorder (power in violet, core outlet in red),
-  LED readouts including period and log power for the source range, core
-  flow and outlet meters.
+  LED readouts including period and log power, core flow and outlet meters.
 - **Full core display**: a BWR-style board with a 2-digit LED notch readout
-  for each of the 55 rods, laid out in the core's shape (00 = fully in,
-  40 = fully out, 4 cm per notch, rods named by grid coordinates such as
-  16-19). The rod select matrix below it has one pushbutton per rod: select
-  one, then WITHDRAW/INSERT it by 1 or 5 notches.
+  for each of the 55 rods (00 = fully in, 40 = fully out, 4 cm per notch;
+  rods are named by grid coordinates such as 16-19). The rod select matrix
+  below it has one pushbutton per rod: select one, then WITHDRAW/INSERT it.
+- **Core monitoring**:
+  - A map of all 342 fuel channels, switchable between channel power,
+    outlet temperature, cladding temperature and sodium boiling margin.
+  - The axial power, clad and sodium profile of the hot channel, or of any
+    channel you click.
+  - Nuclear instruments: source range (cps), intermediate range (log amps),
+    startup rate (decades/min), four power-range quadrant channels N41-N44
+    and the quadrant tilt ratio.
+  - Core figures: peaking factors FQ/FR/FZ, axial offset, xenon and
+    samarium worth, the U-233 and Pa-233 inventory bred from the thorium,
+    boiling margin and the Doppler coefficient.
 - **Reactor control console**:
   - Mushroom-head manual scram, trip reset, RPS armed/bypass, first-out window.
-  - Rod bank buttons (OUT/IN by 20 or 2 cm, with bottom/top lamps).
+  - Rod bank buttons with bottom/top lamps.
   - AUTO/MAN regulating bank control with the power demand.
-  - Turbine TRIP/LATCH and DRACS dampers.
-  - **Loop control**: RUN/STOP for every primary and secondary pump, the
-    hydrogen-in-sodium meter and ISOLATE button for each steam generator, and
-    the feedwater pumps.
-- **Annunciators** (red ones flash) and the **alarm typer**, where the
-  dispatcher, the shift supervisor and the plant report events.
+  - Rod control status lamps.
+
+The bottom row is the plant:
+
+- **Pumps and sodium loops**: RUN/STOP, speed readout and speed setpoint for
+  all eight pumps, pony motor switches, loop flows and hot/cold leg
+  temperatures, and the four hydrogen-in-sodium meters.
+- **Steam and turbine**:
+  - Meters for steam pressure, turbine valve and generator output.
+  - Turbine TRIP/LATCH and the steam pressure setpoint.
+  - Readouts: bypass, safety valves, condenser vacuum, circulating water,
+    feed temperature, steam flow.
+  - Feedwater START/STOP and AUTO/MAN.
+  - Per SG: feed flow, valve position (with manual -/+), steam temperature
+    and heat.
+- **Annunciators** (24 windows; red ones flash) and the **alarm typer**.
+- **Isolation**: feed and main steam isolation valves for each SG, SG
+  isolate-and-dump, all-MSIV shut, and containment isolation (which also
+  shuts the sodium purification cold traps).
+- **Electrical**: grid status, switchyard breaker, generator breaker, bus
+  voltages, and the three diesel generators with manual START/STOP.
+- **Emergency core cooling**: the three DRACS trains, with damper position,
+  heat removed and OPEN/CLOSE for each, plus auto-open on trip. A sodium
+  cooled reactor has no water injection: its emergency core cooling is
+  decay heat removal by natural circulation, with the pony motors as backup.
 
 Lamps follow the US convention of the period: red = running/closed,
 green = stopped/open.
+
+![Loss of offsite power: reactor tripped, diesels on the essential buses, DRACS open](docs/gui_loop.png)
 
 ### Starting up from hot shutdown
 

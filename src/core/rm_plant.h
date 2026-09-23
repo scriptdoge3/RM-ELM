@@ -50,6 +50,7 @@ typedef struct {
     double Q;
     double fw_valve;          /* 0..1 */
     int isolated;             /* feed and steam valves shut, water side blown down */
+    int fiv_open, msiv_open;  /* feedwater and main steam isolation valves */
     /* sodium-water reaction */
     double leak;              /* water/steam leaking into the sodium, kg/s */
     double h2;                /* hydrogen in the secondary sodium, ppm (hydrogen meter) */
@@ -111,7 +112,11 @@ typedef struct {
     double power_set;         /* fraction of rated */
 
     /* electrical */
-    int offsite_power;        /* grid connection available */
+    int offsite_power;        /* grid connected (grid_ok && grid_breaker), derived each step */
+    int grid_ok;              /* the grid itself is up */
+    int grid_breaker;         /* switchyard breaker closed */
+    int diesel_manual[3];     /* operator start (test runs / pre-emptive start) */
+    double diesel_t[3];       /* s since each diesel was called to start */
     int diesel_avail[3];      /* diesel generator not failed */
     int diesel_running[3];
     double diesel_timer;      /* s since loss of offsite power */
@@ -124,9 +129,12 @@ typedef struct {
     double dracs_damper[3];   /* 0..1 */
     double dracs_damper_set[3];
     double Q_dracs;           /* W removed */
+    double Q_dracs_train[3];
     double W_dracs;           /* in-vessel natural circulation through the DRACS coolers, kg/s */
     double h_dracs_out;       /* sodium enthalpy returning from the coolers to the inlet plenum */
     double T_air;             /* K */
+
+    int containment_isolated; /* penetrations shut, incl. the sodium purification (cold trap) lines */
 
     /* reactor protection system */
     int rps_bypass;           /* 1 = trips disabled (for training/accident scenarios) */
