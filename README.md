@@ -65,10 +65,8 @@ already installed). On Linux you need the X11/OpenGL development packages:
 `sudo apt install libgl-dev libx11-dev libxrandr-dev libxinerama-dev
 libxcursor-dev libxi-dev`. To skip the GUI: `-DRMELM_GUI=OFF`.
 
-If the window fails to open ("could not open an OpenGL window"), your
-graphics driver probably lacks OpenGL 3.3 (common in virtual machines and on
-older GPUs). Rebuild raylib for OpenGL 2.1:
-`cmake -S . -B build -DRMELM_GL21=ON && cmake --build build`.
+The GUI uses an OpenGL 2.1 context, which almost every driver supports. To
+build for OpenGL 3.3 core instead: `-DRMELM_GL33=ON`.
 
 ## Play: terminal process computer
 

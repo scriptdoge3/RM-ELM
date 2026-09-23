@@ -928,9 +928,8 @@ int main(void)
     InitWindow(WIN_W, WIN_H, "RM-ELM control room");
     if (!IsWindowReady()) {
         fprintf(stderr,
-                "rmelm_gui: could not open an OpenGL window.\n"
-                "If your graphics driver lacks OpenGL 3.3, rebuild with\n"
-                "  cmake -S . -B build -DRMELM_GL21=ON && cmake --build build\n"
+                "rmelm_gui: could not open an OpenGL 2.1 window.\n"
+                "Check that your graphics driver works (glxinfo -B),\n"
                 "or play the terminal version: ./build/rmelm\n");
         return 1;
     }

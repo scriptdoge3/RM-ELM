@@ -12,7 +12,9 @@ endif()
 option(RMELM_USE_ASM "Use the hand-written x86-64 assembly kernels" ON)
 option(RMELM_BUILD_TESTS "Build the test programs" ON)
 option(RMELM_GUI "Build the graphical control room (raylib)" ON)
-option(RMELM_GL21 "Build raylib for OpenGL 2.1 (older or virtual GPUs)" OFF)
+# The panels are plain 2D shapes, so default to an OpenGL 2.1 context: it opens
+# on almost every driver, where a 3.3 core context is refused by some.
+option(RMELM_GL33 "Build raylib for OpenGL 3.3 core instead of 2.1" OFF)
 
 # The assembly kernels follow the System V AMD64 ABI and are written in GAS
 # syntax, so they need GCC or Clang on an x86-64 target. Everything else
@@ -72,7 +74,9 @@ if(RMELM_GUI)
     include(FetchContent)
     set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(BUILD_GAMES OFF CACHE BOOL "" FORCE)
-    if(RMELM_GL21)
+    if(RMELM_GL33)
+      set(OPENGL_VERSION "3.3" CACHE STRING "" FORCE)
+    else()
       set(OPENGL_VERSION "2.1" CACHE STRING "" FORCE)
     endif()
     FetchContent_Declare(raylib
