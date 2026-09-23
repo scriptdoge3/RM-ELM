@@ -12,6 +12,7 @@ endif()
 option(RMELM_USE_ASM "Use the hand-written x86-64 assembly kernels" ON)
 option(RMELM_BUILD_TESTS "Build the test programs" ON)
 option(RMELM_GUI "Build the graphical control room (raylib)" ON)
+option(RMELM_GL21 "Build raylib for OpenGL 2.1 (older or virtual GPUs)" OFF)
 
 # The assembly kernels follow the System V AMD64 ABI and are written in GAS
 # syntax, so they need GCC or Clang on an x86-64 target. Everything else
@@ -71,6 +72,9 @@ if(RMELM_GUI)
     include(FetchContent)
     set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(BUILD_GAMES OFF CACHE BOOL "" FORCE)
+    if(RMELM_GL21)
+      set(OPENGL_VERSION "2.1" CACHE STRING "" FORCE)
+    endif()
     FetchContent_Declare(raylib
       GIT_REPOSITORY https://github.com/raysan5/raylib.git
       GIT_TAG 5.5

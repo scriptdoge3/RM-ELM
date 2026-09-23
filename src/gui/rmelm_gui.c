@@ -531,7 +531,7 @@ static const char *bank_short[RM_NBANKS] = {"REG", "A", "B", "C", "D", "SAFE"};
  * into 9 staggered rows, laid out like a BWR full core display, and get
  * BWR-style XX-YY coordinates. */
 static int rod_ci[128], rod_rj[128], cmin, cmax, rmin, rmax;
-static char rod_id[128][16];
+static char rod_id[128][24];
 
 static void number_rods(void)
 {
@@ -596,7 +596,7 @@ static void draw_rodselect(Rectangle r)
         if (top > rmax) continue;
         float x = gx0 + (i - cmin) * cp;
         DrawLineEx((Vector2){x, gy0 + (top - rmin) * rp}, (Vector2){x, by}, 1.5f, INK);
-        char lb[4];
+        char lb[12];
         snprintf(lb, sizeof lb, "%02d", 2 * (i - cmin) + 2);
         ctext(lb, x, by + 3, 10, INK);
     }
@@ -922,8 +922,18 @@ static void loading_screen(void)
 
 int main(void)
 {
-    SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT);
+    /* no MSAA: many drivers refuse a multisampled GLX config, and the flat
+     * 1978 panel art does not need it */
+    SetConfigFlags(FLAG_VSYNC_HINT);
     InitWindow(WIN_W, WIN_H, "RM-ELM control room");
+    if (!IsWindowReady()) {
+        fprintf(stderr,
+                "rmelm_gui: could not open an OpenGL window.\n"
+                "If your graphics driver lacks OpenGL 3.3, rebuild with\n"
+                "  cmake -S . -B build -DRMELM_GL21=ON && cmake --build build\n"
+                "or play the terminal version: ./build/rmelm\n");
+        return 1;
+    }
     SetTargetFPS(60);
     P = calloc(1, sizeof *P);
     pthread_t th;
