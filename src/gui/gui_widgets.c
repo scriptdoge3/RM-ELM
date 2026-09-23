@@ -1,8 +1,11 @@
 /*
- * The 1978 panel widget kit: painted steel, engraved nameplates and Dymo
- * tape, red LED readouts, needle and edgewise meters, lamps and illuminated
- * pushbuttons, pistol-grip and J-handle control switches, key switches,
- * rotary selectors, mimic bus lines and the two kinds of chart recorder.
+ * The 1978 panel widget kit: painted steel, engraved lamicoid nameplates and
+ * operator-added label tape, red LED readouts, 250-degree switchboard
+ * meters and vertical edgewise meters with zone bands, indicating lights and
+ * legend lamps, control switches on square escutcheons (pistol grip and
+ * J-handle), key switches, collared and guarded pushbuttons, Bailey-style
+ * manual/automatic control stations, rotary selectors, mimic pipes with flow
+ * arrows and component symbols, and the two kinds of chart recorder.
  */
 #include "gui.h"
 
@@ -19,6 +22,19 @@ Color dimlens(Color c)
 
 Color alpha(Color c, unsigned char a) { return (Color){c.r, c.g, c.b, a}; }
 
+Color mixc(Color a, Color b, float t)
+{
+    return (Color){(unsigned char)(a.r + (b.r - a.r) * t), (unsigned char)(a.g + (b.g - a.g) * t),
+                   (unsigned char)(a.b + (b.b - a.b) * t), (unsigned char)(a.a + (b.a - a.a) * t)};
+}
+
+/* raylib culls one winding; draw both so callers need not care */
+void tri(Vector2 a, Vector2 b, Vector2 c, Color col)
+{
+    DrawTriangle(a, b, c, col);
+    DrawTriangle(a, c, b, col);
+}
+
 int blink_fast(void) { return ((int)(GetTime() * 3)) & 1; }
 int blink_slow(void) { return ((int)(GetTime() * 1)) & 1; }
 
@@ -28,6 +44,51 @@ int clicked(Rectangle r)
     return input_ok && CheckCollisionPointRec(GetMousePosition(), r) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 }
 
+/* ---- per-widget memory, found by position on the canvas ----------------------- */
+#define NMEM 1024
+static struct { int key; float f; double t; } mem[NMEM];
+
+static int *mem_slot(float x, float y, int kind, float **f, double **t)
+{
+    int key = (((int)x) << 12) ^ ((int)y) ^ (kind << 24) ^ 0x5a5a5a;
+    if (key == 0) key = 1;
+    unsigned h = (unsigned)key * 2654435761u;
+    for (int i = 0; i < NMEM; i++) {
+        int s = (int)((h + i) % NMEM);
+        if (mem[s].key == key || mem[s].key == 0) {
+            if (mem[s].key == 0) {
+                mem[s].key = key;
+                mem[s].f = 0;
+                mem[s].t = 0;
+            }
+            if (f) *f = &mem[s].f;
+            if (t) *t = &mem[s].t;
+            return &mem[s].key;
+        }
+    }
+    if (f) *f = &mem[0].f;
+    if (t) *t = &mem[0].t;
+    return &mem[0].key;
+}
+
+int held_repeat(Rectangle r)
+{
+    double *next;
+    mem_slot(r.x, r.y, 3, NULL, &next);
+    if (!input_ok || !CheckCollisionPointRec(GetMousePosition(), r)) return 0;
+    double now = GetTime();
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        *next = now + 0.4;
+        return 1;
+    }
+    if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && now >= *next) {
+        *next = now + 0.1;
+        return 1;
+    }
+    return 0;
+}
+
+/* ---- text and labels ------------------------------------------------------------ */
 void text(const char *s, float x, float y, int size, Color c) { DrawText(s, (int)x, (int)y, size, c); }
 
 void textf(float x, float y, int size, Color c, const char *fmt, ...)
@@ -52,7 +113,7 @@ void screw(float x, float y)
     DrawLineEx((Vector2){x - 3, y + 2}, (Vector2){x + 3, y - 2}, 1, INK);
 }
 
-/* black engraved-plastic nameplate with two rivets */
+/* black engraved-plastic nameplate with two rivets (system and group labels) */
 float plate(float x, float y, const char *s, int size)
 {
     float tw = (float)MeasureText(s, size);
@@ -67,11 +128,24 @@ float plate(float x, float y, const char *s, int size)
 
 void plate_c(float cx, float y, const char *s, int size) { plate(cx - (MeasureText(s, size) + 24) / 2.0f, y, s, size); }
 
-/* embossed label-maker tape */
+/* small engraved component label */
+float tag(float x, float y, const char *s)
+{
+    float tw = (float)MeasureText(s, 10);
+    Rectangle p = {x, y, tw + 10, 13};
+    DrawRectangleRec(p, (Color){26, 26, 24, 255});
+    DrawRectangleLinesEx(p, 1, (Color){74, 74, 70, 255});
+    text(s, x + 5, y + 2, 10, (Color){236, 234, 226, 255});
+    return p.width;
+}
+
+void tag_c(float cx, float y, const char *s) { tag(cx - (MeasureText(s, 10) + 10) / 2.0f, y, s); }
+
+/* embossed label-maker tape: what operators stuck on afterwards */
 float dymo(float x, float y, const char *s)
 {
     float tw = (float)MeasureText(s, 10);
-    DrawRectangleRec((Rectangle){x, y, tw + 8, 13}, (Color){20, 22, 30, 255});
+    DrawRectangleRec((Rectangle){x, y, tw + 8, 13}, (Color){24, 40, 96, 255});
     text(s, x + 4, y + 2, 10, (Color){236, 236, 236, 255});
     return tw + 8;
 }
@@ -93,7 +167,6 @@ void steel(Rectangle r, const char *title)
     if (title) plate_c(r.x + r.width / 2, r.y + 5, title, 12);
 }
 
-/* a sloped desk section in front of the vertical board */
 void desk(Rectangle d)
 {
     DrawRectangleRec(d, DESK);
@@ -102,7 +175,30 @@ void desk(Rectangle d)
 }
 
 /* ---- 7-segment LED readouts ------------------------------------------------ */
-static const unsigned char SEG[10] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F};
+static unsigned seg_bits(char ch)
+{
+    static const unsigned char D[10] = {0x3F, 0x06, 0x5B, 0x4F, 0x66, 0x6D, 0x7D, 0x07, 0x7F, 0x6F};
+    if (ch >= '0' && ch <= '9') return D[ch - '0'];
+    switch (ch) {
+    case '-': return 0x40;
+    case 'A': return 0x77;
+    case 'b': return 0x7C;
+    case 'C': return 0x39;
+    case 'd': return 0x5E;
+    case 'E': return 0x79;
+    case 'F': return 0x71;
+    case 'H': return 0x76;
+    case 'L': return 0x38;
+    case 'n': return 0x54;
+    case 'o': return 0x5C;
+    case 'P': return 0x73;
+    case 'r': return 0x50;
+    case 'S': return 0x6D;
+    case 't': return 0x78;
+    case 'U': return 0x3E;
+    default: return 0;
+    }
+}
 
 float seg_char(float x, float y, float h, char ch, Color on)
 {
@@ -117,10 +213,7 @@ float seg_char(float x, float y, float h, char ch, Color on)
         DrawCircleV((Vector2){x + h * 0.12f, y + h * 0.7f}, t * 0.55f, on);
         return h * 0.3f;
     }
-    unsigned m = 0;
-    if (ch >= '0' && ch <= '9') m = SEG[ch - '0'];
-    else if (ch == '-') m = 0x40;
-    else if (ch == 'E') m = 0x79;
+    unsigned m = seg_bits(ch);
     Rectangle s[7] = {
         {x + t, y, w - 2 * t, t},
         {x + w - t, y + t, t, hh - 1.5f * t},
@@ -214,16 +307,68 @@ void meterl(Rectangle r, const char *label, double v, double lo, double hi, doub
     DrawRectangleGradientV((int)f.x, (int)f.y, (int)f.width, (int)(f.height * 0.35f), alpha(WHITE, 60), alpha(WHITE, 0));
 }
 
+/* 250-degree switchboard meter in a square case ("big look") */
+void dial(Rectangle r, const char *label, double v, double lo, double hi, int nmaj, double g_lo, double g_hi,
+          double r_lo, double r_hi, const char *const *labs)
+{
+    DrawRectangleRounded(r, 0.10f, 6, BEZEL);
+    float R = fminf(r.width, r.height) / 2 - 6;
+    Vector2 c = {r.x + r.width / 2, r.y + r.height / 2};
+    DrawCircleV(c, R, FACE);
+    const float a0 = 145, a1 = 395;
+#define DA(val) (a0 + (a1 - a0) * (float)fmin(1.02, fmax(-0.02, ((val) - lo) / (hi - lo))))
+    float Rs = R - 6;
+    if (g_hi > g_lo) DrawRing(c, Rs - 6, Rs, DA(g_lo), DA(g_hi), 24, (Color){60, 160, 70, 255});
+    if (r_hi > r_lo) DrawRing(c, Rs - 6, Rs, DA(r_lo), DA(r_hi), 24, (Color){210, 40, 30, 255});
+    DrawRing(c, Rs - 0.8f, Rs + 0.4f, a0, a1, 48, INK);
+    int nmin = nmaj * 5;
+    for (int i = 0; i <= nmin; i++) {
+        float a = (a0 + (a1 - a0) * i / nmin) * DEG2RAD;
+        float len = i % 5 ? 4.0f : 8.0f;
+        DrawLineEx((Vector2){c.x + Rs * cosf(a), c.y + Rs * sinf(a)},
+                   (Vector2){c.x + (Rs - len) * cosf(a), c.y + (Rs - len) * sinf(a)}, i % 5 ? 1.0f : 1.6f, INK);
+        if (i % 5 == 0) {
+            char b[16];
+            if (labs) snprintf(b, sizeof b, "%s", labs[i / 5]);
+            else snprintf(b, sizeof b, "%g", lo + (hi - lo) * i / nmin);
+            ctext(b, c.x + (Rs - 17) * cosf(a), c.y + (Rs - 17) * sinf(a) - 4, 10, INK);
+        }
+    }
+    /* legend on the dial, below the scale ends, in two lines if it has a '\n' */
+    const char *nl = strchr(label, '\n');
+    float ly = c.y + 0.574f * (Rs - 17) + 8;
+    if (nl) {
+        char l1[40];
+        snprintf(l1, sizeof l1, "%.*s", (int)(nl - label), label);
+        ctext(l1, c.x, ly, 10, INK);
+        ctext(nl + 1, c.x, ly + 11, 10, INK);
+    } else {
+        ctext(label, c.x, ly + 4, 10, INK);
+    }
+    float a = DA(v) * DEG2RAD;
+#undef DA
+    Vector2 tip = {c.x + (Rs - 3) * cosf(a), c.y + (Rs - 3) * sinf(a)};
+    Vector2 tail = {c.x - 12 * cosf(a), c.y - 12 * sinf(a)};
+    DrawLineEx((Vector2){tail.x + 2, tail.y + 2}, (Vector2){tip.x + 2, tip.y + 2}, 2.4f, alpha(BLACK, 50));
+    DrawLineEx(tail, tip, 2.4f, (Color){16, 16, 16, 255});
+    DrawCircleV(c, 5, (Color){16, 16, 16, 255});
+    DrawCircleV((Vector2){c.x - R * 0.35f, c.y - R * 0.45f}, R * 0.35f, alpha(WHITE, 26));
+}
+
 /* vertical edgewise meter: a narrow window with the scale on the left and a
- * red pointer that slides up and down it */
-void edgew(Rectangle r, const char *label, double v, double lo, double hi, double red_lo, double red_hi, int nmaj,
-           const char *const *labs)
+ * red pointer that slides up and down it; green normal band, red limit band */
+void edgewz(Rectangle r, const char *label, double v, double lo, double hi, double g_lo, double g_hi, double red_lo,
+            double red_hi, int nmaj, const char *const *labs)
 {
     DrawRectangleRec(r, BEZEL);
     Rectangle f = {r.x + 4, r.y + 4, r.width - 8, r.height - 8};
     DrawRectangleRec(f, FACE);
     float y0 = f.y + f.height - 6, y1 = f.y + 6;
 #define EY(val) (y0 + (y1 - y0) * (float)fmin(1.03, fmax(-0.03, ((val) - lo) / (hi - lo))))
+    if (g_hi > g_lo) {
+        float a = EY(g_hi), b = EY(g_lo);
+        DrawRectangleRec((Rectangle){f.x + 1, a, 4, b - a}, (Color){60, 160, 70, 255});
+    }
     if (red_hi > red_lo) {
         float a = EY(red_hi), b = EY(red_lo);
         DrawRectangleRec((Rectangle){f.x + 1, a, 4, b - a}, (Color){210, 40, 30, 255});
@@ -232,23 +377,40 @@ void edgew(Rectangle r, const char *label, double v, double lo, double hi, doubl
     for (int i = 0; i <= nmin; i++) {
         float y = y0 + (y1 - y0) * i / nmin;
         DrawLineEx((Vector2){f.x + 5, y}, (Vector2){f.x + 5 + (i % 5 ? 4.0f : 8.0f), y}, 1, INK);
-        if (i % 5 == 0 && f.width > 26) {
+        if (i % 5 == 0 && f.width >= 24) {
             char b[16];
             if (labs) snprintf(b, sizeof b, "%s", labs[i / 5]);
             else snprintf(b, sizeof b, "%g", lo + (hi - lo) * i / nmin);
-            text(b, f.x + 15, y - 4, 10, INK);
+            text(b, f.x + (f.width > 34 ? 15 : 11), y - 4, 10, INK);
         }
     }
     float py = EY(v);
 #undef EY
     DrawRectangleRec((Rectangle){f.x + 3, py - 1.5f, f.width - 3, 3}, (Color){200, 24, 20, 255});
-    DrawTriangle((Vector2){f.x + f.width, py - 5}, (Vector2){f.x + f.width - 7, py}, (Vector2){f.x + f.width, py + 5},
-                 (Color){200, 24, 20, 255});
+    tri((Vector2){f.x + f.width, py - 5}, (Vector2){f.x + f.width - 7, py}, (Vector2){f.x + f.width, py + 5},
+        (Color){200, 24, 20, 255});
     DrawRectangleGradientH((int)f.x, (int)f.y, (int)(f.width * 0.5f), (int)f.height, alpha(WHITE, 50), alpha(WHITE, 0));
-    if (label) ctext(label, r.x + r.width / 2, r.y + r.height + 3, 10, INK);
+    if (label) {
+        const char *nl = strchr(label, '\n');
+        if (nl) {
+            char l1[32];
+            snprintf(l1, sizeof l1, "%.*s", (int)(nl - label), label);
+            ctext(l1, r.x + r.width / 2, r.y + r.height + 3, 10, INK);
+            ctext(nl + 1, r.x + r.width / 2, r.y + r.height + 14, 10, INK);
+        } else {
+            ctext(label, r.x + r.width / 2, r.y + r.height + 3, 10, INK);
+        }
+    }
+}
+
+void edgew(Rectangle r, const char *label, double v, double lo, double hi, double red_lo, double red_hi, int nmaj,
+           const char *const *labs)
+{
+    edgewz(r, label, v, lo, hi, 0, 0, red_lo, red_hi, nmaj, labs);
 }
 
 /* ---- lamps and pushbuttons --------------------------------------------------- */
+/* GE ET-16 style indicating light */
 void lamp(float x, float y, float rad, Color lens, int lit)
 {
     DrawCircleV((Vector2){x, y}, rad + 2.5f, BEZEL);
@@ -257,7 +419,21 @@ void lamp(float x, float y, float rad, Color lens, int lit)
     DrawCircleV((Vector2){x - rad * 0.35f, y - rad * 0.35f}, rad * 0.3f, alpha(WHITE, lit ? 170 : 60));
 }
 
-/* square illuminated pushbutton with a two-line engraved legend */
+static void legend2(Rectangle in, const char *legend, Color tc)
+{
+    char l1[32], l2[32] = "";
+    const char *nl = strchr(legend, '\n');
+    if (nl) {
+        snprintf(l1, sizeof l1, "%.*s", (int)(nl - legend), legend);
+        snprintf(l2, sizeof l2, "%s", nl + 1);
+        ctext(l1, in.x + in.width / 2, in.y + in.height / 2 - 11, 10, tc);
+        ctext(l2, in.x + in.width / 2, in.y + in.height / 2 + 1, 10, tc);
+    } else {
+        ctext(legend, in.x + in.width / 2, in.y + in.height / 2 - 5, 10, tc);
+    }
+}
+
+/* square illuminated pushbutton with an engraved legend */
 int lampbutton(Rectangle r, const char *legend, Color lens, int lit)
 {
     Vector2 m = GetMousePosition();
@@ -269,30 +445,34 @@ int lampbutton(Rectangle r, const char *legend, Color lens, int lit)
     DrawRectangleRec(in, lit ? lens : dimlens(lens));
     DrawRectangleRec((Rectangle){in.x, in.y, in.width, 2}, alpha(WHITE, lit ? 120 : 40));
     if (hover) DrawRectangleLinesEx(r, 1, (Color){160, 160, 150, 255});
-    Color tc = lit ? (Color){20, 16, 12, 255} : (Color){26, 26, 24, 255};
-    char l1[32], l2[32] = "";
-    const char *nl = strchr(legend, '\n');
-    if (nl) {
-        snprintf(l1, sizeof l1, "%.*s", (int)(nl - legend), legend);
-        snprintf(l2, sizeof l2, "%s", nl + 1);
-        ctext(l1, in.x + in.width / 2, in.y + in.height / 2 - 11, 10, tc);
-        ctext(l2, in.x + in.width / 2, in.y + in.height / 2 + 1, 10, tc);
-    } else {
-        ctext(legend, in.x + in.width / 2, in.y + in.height / 2 - 5, 10, tc);
-    }
+    legend2(in, legend, lit ? (Color){20, 16, 12, 255} : (Color){26, 26, 24, 255});
     return hover && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 }
 
-/* annunciator window */
+/* legend light: an engraved lens that lights up (no button) */
+void indicator(Rectangle r, const char *legend, Color lens, int lit)
+{
+    if (lit) DrawRectangleRec((Rectangle){r.x - 2, r.y - 2, r.width + 4, r.height + 4}, alpha(lens, 40));
+    DrawRectangleRec(r, BEZEL);
+    Rectangle in = {r.x + 2, r.y + 2, r.width - 4, r.height - 4};
+    DrawRectangleRec(in, lit ? lens : mixc(lens, (Color){70, 70, 66, 255}, 0.62f));
+    if (lit) DrawRectangleGradientV((int)in.x, (int)in.y, (int)in.width, (int)(in.height / 2), alpha(WHITE, 90), alpha(WHITE, 0));
+    legend2(in, legend, lit ? (Color){18, 14, 10, 255} : (Color){36, 36, 32, 255});
+}
+
+/* annunciator window: white engraved lens, backlit in its priority colour */
 void window(Rectangle t, const char *l1, const char *l2, Color lens, int lit)
 {
     DrawRectangleRec(t, BEZEL);
-    Rectangle in = {t.x + 3, t.y + 3, t.width - 6, t.height - 6};
-    DrawRectangleRec(in, lit ? lens : (Color){88, 88, 82, 255});
-    if (lit) DrawRectangleGradientV((int)in.x, (int)in.y, (int)in.width, (int)(in.height / 2), alpha(WHITE, 90), alpha(WHITE, 0));
-    Color tc = lit ? (Color){16, 12, 10, 255} : (Color){58, 58, 54, 255};
-    ctext(l1, in.x + in.width / 2, in.y + in.height / 2 - (l2 ? 11 : 5), 10, tc);
-    if (l2) ctext(l2, in.x + in.width / 2, in.y + in.height / 2 + 2, 10, tc);
+    Rectangle in = {t.x + 2, t.y + 2, t.width - 4, t.height - 4};
+    int white = lens.r > 240 && lens.g > 230;
+    Color off = white ? (Color){196, 194, 184, 255} : mixc(lens, (Color){168, 164, 156, 255}, 0.72f);
+    Color on = white ? (Color){255, 253, 238, 255} : mixc(lens, WHITE, 0.18f);
+    DrawRectangleRec(in, lit ? on : off);
+    if (lit) DrawRectangleGradientV((int)in.x, (int)in.y, (int)in.width, (int)(in.height / 2), alpha(WHITE, 110), alpha(WHITE, 0));
+    Color tc = lit ? (Color){14, 12, 10, 255} : (Color){52, 50, 46, 255};
+    if (l1) ctext(l1, in.x + in.width / 2, in.y + in.height / 2 - (l2 ? 11 : 5), 10, tc);
+    if (l2) ctext(l2, in.x + in.width / 2, in.y + in.height / 2 + 1, 10, tc);
 }
 
 /* rotary selector: positions spread over an arc, click a legend to turn it */
@@ -312,38 +492,17 @@ int rotary(Vector2 c, float rad, int n, const char *const *leg, int cur, float a
         ctext(leg[i], t.x, t.y - 5, 10, i == cur ? (Color){150, 20, 10, 255} : INK);
         if (hv && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) pick = i;
     }
-    /* knob: black bakelite with a white pointer */
+    /* knob: black bakelite bar knob with a white line */
     DrawCircleV((Vector2){c.x + 2, c.y + 3}, rad, alpha(BLACK, 90));
     DrawCircleV(c, rad, (Color){24, 24, 22, 255});
     DrawRing(c, rad - 3, rad, 0, 360, 36, (Color){70, 70, 66, 255});
     float a = (a0 + (a1 - a0) * cur / (n - 1)) * DEG2RAD;
-    DrawLineEx((Vector2){c.x - (rad - 6) * cosf(a) * 0.4f, c.y - (rad - 6) * sinf(a) * 0.4f},
-               (Vector2){c.x + (rad - 4) * cosf(a), c.y + (rad - 4) * sinf(a)}, 5, (Color){236, 234, 224, 255});
+    Vector2 d = {cosf(a), sinf(a)};
+    DrawLineEx((Vector2){c.x - d.x * rad * 0.9f, c.y - d.y * rad * 0.9f}, (Vector2){c.x + d.x * rad * 0.9f, c.y + d.y * rad * 0.9f},
+               rad * 0.55f, (Color){40, 40, 38, 255});
+    DrawLineEx((Vector2){c.x - d.x * (rad - 6) * 0.3f, c.y - d.y * (rad - 6) * 0.3f},
+               (Vector2){c.x + d.x * (rad - 3), c.y + d.y * (rad - 3)}, 3, (Color){236, 234, 224, 255});
     return pick;
-}
-
-/* incandescent lamp glowing from ember to white with f = 0..1, red flashing past 0.92 */
-void map_lamp(Vector2 p, float rad, double f, int blink)
-{
-    if (f < 0) f = 0;
-    if (f > 1) f = 1;
-    DrawCircleV(p, rad, (Color){20, 18, 16, 255});
-    float lr = rad * 0.78f;
-    if (f > 0.92) {
-        Color red = blink ? (Color){255, 70, 40, 255} : (Color){110, 26, 18, 255};
-        if (blink) DrawCircleV(p, rad + 1.5f, (Color){255, 60, 30, 70});
-        DrawCircleV(p, lr, red);
-    } else {
-        static const float K[4][4] = {{0.0f, 45, 18, 8}, {0.35f, 190, 70, 14}, {0.65f, 255, 190, 60}, {0.92f, 255, 248, 215}};
-        int k = f < K[1][0] ? 0 : (f < K[2][0] ? 1 : 2);
-        float t = (float)((f - K[k][0]) / (K[k + 1][0] - K[k][0]));
-        if (t > 1) t = 1;
-        Color c = {(unsigned char)(K[k][1] + (K[k + 1][1] - K[k][1]) * t), (unsigned char)(K[k][2] + (K[k + 1][2] - K[k][2]) * t),
-                   (unsigned char)(K[k][3] + (K[k + 1][3] - K[k][3]) * t), 255};
-        if (f > 0.5) DrawCircleV(p, rad + 1.5f, (Color){255, 220, 140, (unsigned char)(120 * (f - 0.5))});
-        DrawCircleV(p, lr, c);
-    }
-    DrawCircleV((Vector2){p.x - lr * 0.3f, p.y - lr * 0.3f}, lr * 0.28f, (Color){255, 255, 255, 60});
 }
 
 void tooltip(const char *tip, Rectangle within)
@@ -357,46 +516,33 @@ void tooltip(const char *tip, Rectangle within)
 }
 
 /* ---- control switches ------------------------------------------------------------ */
-/* the target flag of each switch, found by its position on the canvas */
-#define NFLAG 512
-static struct { int key; signed char flag; } flags[NFLAG];
-
-static signed char *flag_of(float cx, float y)
-{
-    int key = ((int)cx << 12) ^ (int)y ^ 0x5a5a5a;
-    unsigned h = (unsigned)key * 2654435761u;
-    for (int i = 0; i < NFLAG; i++) {
-        int s = (int)((h + i) % NFLAG);
-        if (flags[s].key == key) return &flags[s].flag;
-        if (flags[s].key == 0) {
-            flags[s].key = key;
-            flags[s].flag = 0;
-            return &flags[s].flag;
-        }
-    }
-    return &flags[0].flag;
-}
-
-int cswitch(float cx, float y, const char *name, const char *ll, const char *rl, int red, int green, int style, int *ptl)
+int cswitch3(float cx, float y, const char *name, const char *ll, const char *rl, int red, int green, int style,
+             int *ptl, Color c3, int lit3)
 {
     Vector2 m = GetMousePosition();
-    signed char *flag = flag_of(cx, y);
-    if (*flag == 0) *flag = red ? 1 : -1;
-    if (name) dymo_c(cx, y, name);
-    lamp(cx - 14, y + 23, 6, L_GRN, green);
-    lamp(cx + 14, y + 23, 6, L_RED, red);
+    float *flag;
+    mem_slot(cx, y, 1, &flag, NULL);
+    if (*flag == 0) *flag = red ? 1.0f : -1.0f;
+    if (name) tag_c(cx, y, name);
+    int three = c3.a != 0;
+    lamp(cx - 20, y + 25, 6, L_GRN, green);
+    if (three) lamp(cx, y + 25, 6, c3, lit3);
+    lamp(cx + 20, y + 25, 6, L_RED, red);
 
-    /* escutcheon */
-    Rectangle e = {cx - 37, y + 34, 74, 44};
-    DrawRectangleRec(e, (Color){26, 26, 24, 255});
-    DrawRectangleLinesEx(e, 1, (Color){90, 90, 84, 255});
-    textf(e.x + 3, e.y + e.height - 12, 10, (Color){220, 220, 210, 255}, "%s", ll);
+    /* square escutcheon with four screws and the engraved positions */
+    Rectangle e = {cx - 40, y + 38, 80, 58};
+    DrawRectangleRounded(e, 0.12f, 4, (Color){24, 24, 22, 255});
+    DrawRectangleRoundedLines(e, 0.12f, 4, (Color){92, 92, 86, 255});
+    for (int k = 0; k < 4; k++)
+        DrawCircleV((Vector2){e.x + (k & 1 ? e.width - 5 : 5), e.y + (k & 2 ? e.height - 5 : 24)}, 2.0f, (Color){120, 120, 114, 255});
+    Color eng = {226, 224, 214, 255};
+    text(ll, e.x + 4, e.y + 3, 10, eng);
     int rw = MeasureText(rl, 10);
-    textf(e.x + e.width - rw - 3, e.y + e.height - 12, 10, (Color){220, 220, 210, 255}, "%s", rl);
-    /* target flag between the lamps: red after a close, green after a trip */
-    Rectangle fl = {cx - 4, y + 19, 8, 8};
+    text(rl, e.x + e.width - rw - 4, e.y + 3, 10, eng);
+    /* target flag: red after a close, green after a trip */
+    Rectangle fl = {cx - 6, e.y + e.height - 12, 12, 8};
     DrawRectangleRec(fl, BEZEL);
-    DrawRectangleRec((Rectangle){fl.x + 1, fl.y + 1, 6, 6}, *flag > 0 ? (Color){200, 40, 30, 255} : (Color){40, 150, 60, 255});
+    DrawRectangleRec((Rectangle){fl.x + 1, fl.y + 1, 10, 6}, *flag > 0 ? (Color){200, 40, 30, 255} : (Color){40, 150, 60, 255});
 
     int hv = input_ok && CheckCollisionPointRec(m, e);
     int side = 0, ret = 0;
@@ -405,7 +551,7 @@ int cswitch(float cx, float y, const char *name, const char *ll, const char *rl,
         int s = m.x < cx ? -1 : 1;
         if (!(ptl && *ptl && s > 0)) {
             ret = s;
-            *flag = (signed char)s;
+            *flag = (float)s;
         }
     }
     if (ptl && hv && IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
@@ -414,25 +560,27 @@ int cswitch(float cx, float y, const char *name, const char *ll, const char *rl,
     }
     int locked = ptl && *ptl;
     if (locked) side = -1;
-    if (hv) DrawRectangleLinesEx(e, 1, (Color){190, 190, 180, 255});
+    if (hv) DrawRectangleRoundedLines(e, 0.12f, 4, (Color){200, 200, 190, 255});
 
     /* handle */
-    Vector2 hc = {cx, e.y + 20};
-    float ang = (float)(side * 45.0 * DEG2RAD);
-    float len = locked ? 20.0f : 17.0f;
+    Vector2 hc = {cx, e.y + 34};
+    float ang = (float)(side * 48.0 * DEG2RAD);
+    float len = locked ? 18.0f : 15.0f;
     Vector2 dir = {sinf(ang), -cosf(ang)};
     Vector2 tip = {hc.x + dir.x * len, hc.y + dir.y * len};
-    Vector2 tail = {hc.x - dir.x * 6, hc.y - dir.y * 6};
+    Vector2 tail = {hc.x - dir.x * 7, hc.y - dir.y * 7};
     DrawCircleV((Vector2){hc.x + 2, hc.y + 2}, 11, alpha(BLACK, 90));
-    if (style == SW_PISTOL) {
+    if ((style & SW_SHAPE) == SW_PISTOL) {
+        Color hcol = style & SW_GREEN ? (Color){30, 96, 44, 255} : style & SW_RED ? (Color){150, 24, 18, 255}
+                                                                                  : (Color){18, 18, 16, 255};
         DrawLineEx((Vector2){tail.x + 2, tail.y + 2}, (Vector2){tip.x + 2, tip.y + 2}, 10, alpha(BLACK, 80));
-        DrawLineEx(tail, tip, 10, (Color){18, 18, 16, 255});
-        DrawCircleV(tip, 6, (Color){18, 18, 16, 255});
-        DrawCircleV(hc, 10, (Color){34, 34, 32, 255});
-        DrawLineEx(hc, tip, 2, (Color){90, 90, 86, 255});
+        DrawLineEx(tail, tip, 10, hcol);
+        DrawCircleV(tip, 5, hcol);
+        DrawCircleV(hc, 10, mixc(hcol, (Color){60, 60, 58, 255}, 0.5f));
+        DrawLineEx(hc, tip, 2, (Color){120, 120, 116, 255});
     } else {
         /* J-handle: chrome shank with a hooked end */
-        Color ch = {176, 178, 174, 255};
+        Color ch = {184, 186, 182, 255};
         DrawCircleV(hc, 10, (Color){60, 60, 58, 255});
         DrawLineEx(tail, tip, 6, ch);
         Vector2 perp = {dir.y, -dir.x};
@@ -442,10 +590,15 @@ int cswitch(float cx, float y, const char *name, const char *ll, const char *rl,
         DrawLineEx((Vector2){hook.x, hook.y}, (Vector2){hook.x - dir.x * 5, hook.y - dir.y * 5}, 6, ch);
     }
     if (locked) {
-        DrawRectangleRec((Rectangle){e.x + 2, e.y + 2, 20, 10}, (Color){240, 200, 40, 255});
-        text("PTL", e.x + 4, e.y + 2, 10, INK);
+        DrawRectangleRec((Rectangle){e.x + e.width - 24, e.y + e.height - 13, 20, 10}, (Color){240, 200, 40, 255});
+        text("PTL", e.x + e.width - 22, e.y + e.height - 13, 10, INK);
     }
     return ret;
+}
+
+int cswitch(float cx, float y, const char *name, const char *ll, const char *rl, int red, int green, int style, int *ptl)
+{
+    return cswitch3(cx, y, name, ll, rl, red, green, style, ptl, (Color){0, 0, 0, 0}, 0);
 }
 
 int keysw(float cx, float cy, const char *l0, const char *l1, int state)
@@ -460,12 +613,149 @@ int keysw(float cx, float cy, const char *l0, const char *l1, int state)
     DrawCircleV(c, 10, (Color){196, 164, 80, 255});        /* brass lock cylinder */
     float a = (float)((state ? 45.0 : -45.0) * DEG2RAD);
     Vector2 d = {sinf(a), -cosf(a)};
-    /* key bow sticking out of the cylinder */
     DrawLineEx((Vector2){cx - d.x * 7, cy - d.y * 7}, (Vector2){cx + d.x * 7, cy + d.y * 7}, 3, (Color){60, 50, 30, 255});
     DrawCircleV((Vector2){cx + d.x * 12, cy + d.y * 12}, 5, (Color){210, 210, 200, 255});
     int hv = input_ok && CheckCollisionPointCircle(m, c, 14);
     if (hv) DrawCircleLinesV(c, 15, WHITE);
     return hv && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+}
+
+/* round pushbutton with a coloured collar and the legend engraved below */
+int pbround(Vector2 c, float r, const char *label, Color cap, Color collar, int lit)
+{
+    Vector2 m = GetMousePosition();
+    int hv = input_ok && CheckCollisionPointCircle(m, c, r + 4);
+    int dn = hv && IsMouseButtonDown(MOUSE_BUTTON_LEFT);
+    DrawCircleV(c, r + 6, collar);
+    DrawRing(c, r + 5, r + 6.5f, 0, 360, 32, BEZEL);
+    DrawCircleV((Vector2){c.x + 1.5f, c.y + 2}, r, alpha(BLACK, 90));
+    Color k = lit ? cap : (cap.r + cap.g + cap.b > 500 ? mixc(cap, (Color){120, 120, 116, 255}, 0.4f) : cap);
+    DrawCircleV(c, dn ? r - 2 : r, dn ? mixc(k, BLACK, 0.25f) : k);
+    DrawCircleV((Vector2){c.x - r * 0.3f, c.y - r * 0.35f}, r * 0.3f, alpha(WHITE, lit ? 150 : 50));
+    if (hv) DrawCircleLinesV(c, r + 7, (Color){220, 220, 210, 255});
+    if (label) {
+        const char *nl = strchr(label, '\n');
+        if (nl) {
+            char l1[32];
+            snprintf(l1, sizeof l1, "%.*s", (int)(nl - label), label);
+            ctext(l1, c.x, c.y + r + 9, 10, INK);
+            ctext(nl + 1, c.x, c.y + r + 20, 10, INK);
+        } else {
+            ctext(label, c.x, c.y + r + 9, 10, INK);
+        }
+    }
+    return hv && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
+}
+
+/* pushbutton under a hinged red guard: the first click lifts the guard for a
+ * few seconds, the second pushes the button */
+int pbguard(Rectangle r, const char *legend, Color lens, int lit)
+{
+    double *open_until;
+    mem_slot(r.x, r.y, 2, NULL, &open_until);
+    double now = GetTime();
+    int open = now < *open_until;
+    int ret = 0;
+    if (open) {
+        ret = lampbutton(r, legend, lens, lit);
+        if (ret) *open_until = 0;
+        /* the lifted guard stands up behind the button */
+        DrawRectangleRec((Rectangle){r.x - 3, r.y - 12, r.width + 6, 9}, (Color){170, 30, 24, 220});
+        DrawRectangleLinesEx((Rectangle){r.x - 3, r.y - 12, r.width + 6, 9}, 1, BEZEL);
+    } else {
+        lampbutton(r, legend, lens, lit);
+        Rectangle g = {r.x - 3, r.y - 3, r.width + 6, r.height + 6};
+        DrawRectangleRec(g, (Color){190, 36, 28, 150});
+        DrawRectangleLinesEx(g, 2, (Color){120, 20, 14, 255});
+        DrawRectangleRec((Rectangle){g.x, g.y, g.width, 4}, (Color){60, 60, 58, 255});   /* hinge */
+        if (clicked(g)) *open_until = now + 6.0;
+    }
+    return ret;
+}
+
+/* ---- manual / automatic control station --------------------------------------- */
+int mastation(Rectangle r, const char *name, const char *unit, double pv, double sp, double lo, double hi, double out,
+              int mode)
+{
+    int ev = 0;
+    if (name) tag_c(r.x + r.width / 2, r.y, name);
+    Rectangle b = {r.x, r.y + 16, r.width, r.height - 16};
+    DrawRectangleRounded(b, 0.06f, 4, (Color){54, 56, 54, 255});
+    DrawRectangleRoundedLines(b, 0.06f, 4, BEZEL);
+    /* process indicator with the setpoint index */
+    Rectangle s = {b.x + 8, b.y + 8, 36, 90};
+    DrawRectangleRec((Rectangle){s.x - 2, s.y - 2, s.width + 4, s.height + 4}, BEZEL);
+    DrawRectangleRec(s, FACE);
+    float y0 = s.y + s.height - 5, y1 = s.y + 5;
+#define SY(val) (y0 + (y1 - y0) * (float)fmin(1.03, fmax(-0.03, ((val) - lo) / (hi - lo))))
+    for (int i = 0; i <= 10; i++) {
+        float y = y0 + (y1 - y0) * i / 10;
+        DrawLineEx((Vector2){s.x + s.width - (i % 5 ? 5.0f : 9.0f), y}, (Vector2){s.x + s.width, y}, 1, INK);
+        if (i % 5 == 0) {
+            char t[16];
+            snprintf(t, sizeof t, "%g", lo + (hi - lo) * i / 10);
+            text(t, s.x + 2, y - 4, 10, INK);
+        }
+    }
+    if (isfinite(sp)) {
+        float y = SY(sp);
+        tri((Vector2){s.x - 2, y - 5}, (Vector2){s.x + 6, y}, (Vector2){s.x - 2, y + 5}, (Color){16, 16, 16, 255});
+    }
+    if (isfinite(pv)) {
+        float y = SY(pv);
+        DrawLineEx((Vector2){s.x + 12, y}, (Vector2){s.x + s.width, y}, 2, (Color){200, 24, 20, 255});
+        tri((Vector2){s.x + s.width + 2, y - 5}, (Vector2){s.x + s.width - 5, y}, (Vector2){s.x + s.width + 2, y + 5},
+            (Color){200, 24, 20, 255});
+    }
+#undef SY
+    /* setpoint window and units */
+    float rx = b.x + 50;
+    text("SET", rx, b.y + 8, 10, (Color){210, 210, 200, 255});
+    Rectangle sw = {rx, b.y + 20, b.width - 56, 16};
+    DrawRectangleRec(sw, (Color){228, 224, 208, 255});
+    DrawRectangleLinesEx(sw, 1, BEZEL);
+    if (isfinite(sp)) {
+        char t[16];
+        snprintf(t, sizeof t, fabs(sp) < 10 ? "%.2f" : "%.0f", sp);
+        ctext(t, sw.x + sw.width / 2, sw.y + 3, 10, INK);
+    }
+    if (unit) ctext(unit, sw.x + sw.width / 2, b.y + 40, 10, (Color){210, 210, 200, 255});
+    text("PV", rx, b.y + 60, 10, (Color){240, 100, 90, 255});
+    DrawRectangleRec((Rectangle){rx + 20, b.y + 59, 18, 12}, (Color){200, 200, 190, 255});
+    text("SP", rx + 22, b.y + 60, 10, INK);
+    /* output meter */
+    Rectangle o = {b.x + 8, b.y + 106, b.width - 16, 13};
+    DrawRectangleRec((Rectangle){o.x - 2, o.y - 2, o.width + 4, o.height + 4}, BEZEL);
+    DrawRectangleRec(o, FACE);
+    for (int i = 0; i <= 4; i++) {
+        float x = o.x + o.width * i / 4;
+        DrawLineEx((Vector2){x, o.y}, (Vector2){x, o.y + (i % 2 ? 4.0f : 7.0f)}, 1, INK);
+    }
+    if (isfinite(out)) {
+        float x = o.x + o.width * (float)fmin(1.0, fmax(0.0, out));
+        DrawLineEx((Vector2){x, o.y}, (Vector2){x, o.y + o.height}, 2, (Color){16, 16, 16, 255});
+    }
+    text("OUT", o.x, o.y + o.height + 2, 10, (Color){210, 210, 200, 255});
+    /* A, M, raise and lower */
+    float by = b.y + b.height - 24;
+    if (mode >= 0) {
+        if (lampbutton((Rectangle){b.x + 5, by, 22, 18}, "A", L_WHT, mode == 1)) ev |= MA_AUTO;
+        if (lampbutton((Rectangle){b.x + 29, by, 22, 18}, "M", L_AMB, mode == 0)) ev |= MA_MAN;
+    }
+    Rectangle up = {b.x + b.width - 42, by, 18, 18}, dn = {b.x + b.width - 22, by, 18, 18};
+    if (mode < 0) {
+        up = (Rectangle){b.x + 14, by, 30, 18};
+        dn = (Rectangle){b.x + b.width - 44, by, 30, 18};
+    }
+    lampbutton(up, "", (Color){210, 210, 200, 255}, 0);
+    lampbutton(dn, "", (Color){210, 210, 200, 255}, 0);
+    tri((Vector2){up.x + up.width / 2, up.y + 4}, (Vector2){up.x + 4, up.y + up.height - 5},
+        (Vector2){up.x + up.width - 4, up.y + up.height - 5}, INK);
+    tri((Vector2){dn.x + 4, dn.y + 5}, (Vector2){dn.x + dn.width - 4, dn.y + 5}, (Vector2){dn.x + dn.width / 2, dn.y + dn.height - 4},
+        INK);
+    if (held_repeat(up)) ev |= MA_UP;
+    if (held_repeat(dn)) ev |= MA_DOWN;
+    return ev;
 }
 
 /* ---- mimic and demarcation --------------------------------------------------------- */
@@ -479,14 +769,113 @@ void mimic_poly(const Vector2 *pts, int n, float w, Color c)
     }
 }
 
-/* the black tape boxes plants added round groups of controls */
+/* painted mimic line with flow-direction chevrons */
+void mpipe(const Vector2 *pts, int n, Color c, float w, int arrows)
+{
+    mimic_poly(pts, n, w, c);
+    DrawCircleV(pts[0], w / 2, c);
+    if (!arrows) return;
+    for (int i = 0; i + 1 < n; i++) {
+        float dx = pts[i + 1].x - pts[i].x, dy = pts[i + 1].y - pts[i].y;
+        float L = sqrtf(dx * dx + dy * dy);
+        if (L < 36) continue;
+        dx /= L;
+        dy /= L;
+        int na = (int)(L / 90) + 1;
+        for (int k = 0; k < na; k++) {
+            float t = (k + 0.5f) / na * L;
+            Vector2 m = {pts[i].x + dx * t, pts[i].y + dy * t};
+            float s = w * 1.6f + 3;
+            Vector2 tip = {m.x + dx * s, m.y + dy * s};
+            Vector2 l = {m.x - dy * s, m.y + dx * s}, r = {m.x + dy * s, m.y - dx * s};
+            tri(tip, l, r, c);
+        }
+    }
+}
+
+/* pump: a circle with a triangle pointing the way the fluid goes (dir 0 right, 1 down, 2 left, 3 up) */
+void sym_pump(Vector2 c, float r, Color col, int running, int dir)
+{
+    DrawCircleV(c, r + 2, col);
+    DrawCircleV(c, r - 1, (Color){30, 30, 28, 255});
+    float a = dir * 90.0f * DEG2RAD, ca = cosf(a), sa = sinf(a);
+    Vector2 p[3] = {{-0.45f * r, -0.55f * r}, {-0.45f * r, 0.55f * r}, {0.65f * r, 0}};
+    for (int i = 0; i < 3; i++) p[i] = (Vector2){c.x + p[i].x * ca - p[i].y * sa, c.y + p[i].x * sa + p[i].y * ca};
+    tri(p[0], p[1], p[2], running ? L_RED : dimlens(L_RED));
+}
+
+void sym_valve(Vector2 c, float s, int vertical, Color col, int open)
+{
+    Color f = open ? L_RED : L_GRN;
+    if (vertical) {
+        tri((Vector2){c.x - s, c.y - s}, (Vector2){c.x + s, c.y - s}, c, f);
+        tri((Vector2){c.x - s, c.y + s}, (Vector2){c.x + s, c.y + s}, c, f);
+        DrawLineEx((Vector2){c.x - s, c.y - s}, (Vector2){c.x + s, c.y - s}, 1.5f, col);
+        DrawLineEx((Vector2){c.x - s, c.y + s}, (Vector2){c.x + s, c.y + s}, 1.5f, col);
+    } else {
+        tri((Vector2){c.x - s, c.y - s}, (Vector2){c.x - s, c.y + s}, c, f);
+        tri((Vector2){c.x + s, c.y - s}, (Vector2){c.x + s, c.y + s}, c, f);
+        DrawLineEx((Vector2){c.x - s, c.y - s}, (Vector2){c.x - s, c.y + s}, 1.5f, col);
+        DrawLineEx((Vector2){c.x + s, c.y - s}, (Vector2){c.x + s, c.y + s}, 1.5f, col);
+    }
+}
+
+/* heat exchanger: shell in one colour, the tube coil in the other */
+void sym_hx(Rectangle r, Color a, Color b, const char *name)
+{
+    DrawRectangleRec(r, (Color){36, 36, 34, 255});
+    DrawRectangleLinesEx(r, 3, a);
+    int n = 5;
+    for (int i = 0; i < n; i++) {
+        float y0 = r.y + 5 + (r.height - 10) * i / n, y1 = r.y + 5 + (r.height - 10) * (i + 1) / n;
+        DrawLineEx((Vector2){r.x + (i & 1 ? r.width - 6 : 6), y0}, (Vector2){r.x + (i & 1 ? 6 : r.width - 6), y1}, 2.5f, b);
+    }
+    if (name) ctext(name, r.x + r.width / 2, r.y + r.height + 3, 10, INK);
+}
+
+void sym_tank(Rectangle r, Color col, const char *name)
+{
+    DrawRectangleRounded(r, 0.4f, 6, (Color){36, 36, 34, 255});
+    DrawRectangleRoundedLines(r, 0.4f, 6, col);
+    if (name) ctext(name, r.x + r.width / 2, r.y + r.height / 2 - 5, 10, (Color){220, 220, 210, 255});
+}
+
+void sym_breaker(Vector2 p, int closed)
+{
+    Rectangle b = {p.x - 9, p.y - 9, 18, 18};
+    DrawRectangleRec(b, closed ? L_RED : L_GRN);
+    DrawRectangleLinesEx(b, 2, BEZEL);
+}
+
+void sym_xfmr(Vector2 p, Color col, int vertical)
+{
+    Vector2 a = vertical ? (Vector2){p.x, p.y - 8} : (Vector2){p.x - 8, p.y};
+    Vector2 b = vertical ? (Vector2){p.x, p.y + 8} : (Vector2){p.x + 8, p.y};
+    DrawRing(a, 9, 12, 0, 360, 24, col);
+    DrawRing(b, 9, 12, 0, 360, 24, col);
+}
+
+/* the black tape boxes round groups of controls */
 void demarc(Rectangle r, const char *label)
 {
-    DrawRectangleLinesEx(r, 2, (Color){24, 24, 22, 255});
+    DrawRectangleLinesEx(r, 3, (Color){20, 20, 18, 255});
     if (label) {
         int tw = MeasureText(label, 10);
-        DrawRectangleRec((Rectangle){r.x + 8, r.y - 6, tw + 8.0f, 12}, PAINT);
-        text(label, r.x + 12, r.y - 5, 10, INK);
+        DrawRectangleRec((Rectangle){r.x + 10, r.y - 7, tw + 12.0f, 14}, (Color){26, 26, 24, 255});
+        text(label, r.x + 16, r.y - 5, 10, (Color){236, 234, 226, 255});
+    }
+}
+
+void mimic_legend(float x, float y)
+{
+    struct { const char *n; Color c; } k[5] = {
+        {"PRIMARY NA", MIM_PNA}, {"INTERMED NA", MIM_SNA}, {"FEED/COND", MIM_WTR}, {"STEAM", MIM_STM}, {"AIR/GAS", MIM_AIR}};
+    DrawRectangleRec((Rectangle){x, y, 112, 76}, (Color){228, 226, 214, 255});
+    DrawRectangleLinesEx((Rectangle){x, y, 112, 76}, 1, BEZEL);
+    text("MIMIC CODE", x + 6, y + 3, 10, INK);
+    for (int i = 0; i < 5; i++) {
+        DrawRectangleRec((Rectangle){x + 6, y + 18 + i * 11, 20, 5}, k[i].c);
+        text(k[i].n, x + 32, y + 15 + i * 11, 10, INK);
     }
 }
 
@@ -535,8 +924,8 @@ void strip(Rectangle fr, int ch_a, float lo_a, float hi_a, const char *name_a, i
             DrawLineEx((Vector2){xa, y - sp}, (Vector2){a, y}, 1.6f, PEN_VIO);
             if (ch_b >= 0) DrawLineEx((Vector2){xb, y - sp}, (Vector2){bb, y}, 1.6f, PEN_RED);
         } else {
-            DrawTriangle((Vector2){a, wl}, (Vector2){a - 5, wl - 8}, (Vector2){a + 5, wl - 8}, PEN_VIO);
-            if (ch_b >= 0) DrawTriangle((Vector2){bb, wl}, (Vector2){bb - 5, wl - 8}, (Vector2){bb + 5, wl - 8}, PEN_RED);
+            tri((Vector2){a, wl}, (Vector2){a - 5, wl - 8}, (Vector2){a + 5, wl - 8}, PEN_VIO);
+            if (ch_b >= 0) tri((Vector2){bb, wl}, (Vector2){bb - 5, wl - 8}, (Vector2){bb + 5, wl - 8}, PEN_RED);
         }
         xa = a;
         xb = bb;
@@ -564,7 +953,6 @@ void mpr_draw(Rectangle fr, const mpr *m, const char *title, const char *scale_l
     DrawRectangleLinesEx(fr, 2, BEZEL);
     ctext(title, fr.x + fr.width / 2, fr.y + 5, 10, (Color){230, 230, 220, 255});
     Rectangle pp = {fr.x + 8, fr.y + 34, fr.width - 16, fr.height - 42};
-    /* point legend */
     float lx = fr.x + 8;
     for (int i = 0; i < m->n; i++) {
         char b[24];

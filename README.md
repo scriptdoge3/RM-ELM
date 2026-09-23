@@ -29,44 +29,77 @@ used. Force C with `-DRMELM_USE_ASM=OFF`.
 ./build/rmelm_gui
 ```
 
-![RM-ELM main control board at full power](docs/gui.png)
+![RM-ELM reactor board at full power](docs/gui.png)
 
-A point-and-click control room drawn in 1978 style: flat painted-steel boards
-with engraved nameplates and Dymo labels, needle and edgewise meters, red LED
-readouts, strip-chart and multipoint recorders, pistol-grip and J-handle
-control switches, key switches, and annunciator window boxes with a horn. Each
-board is laid out on a 1920x1080 canvas and scaled to your display, borderless
-full screen (F11 toggles it; `RMELM_WINDOWED=1` starts in a window). At launch
-you pick **start at rated power** or **start from hot shutdown**, and whether
-random equipment failures are on. The sim runs in real time. HOLD pauses it,
-and F12 saves a screenshot (`screenshotNNN.png`).
+A point-and-click control room drawn in 1978 style, after the US plants of
+the period (the TMI-2 and Shoreham human-factors reviews, the FFTF and Clinch
+River sodium plants; see [docs/control_room_research.md](docs/control_room_research.md)).
+Each board is a row of system sections. Every section has its own
+annunciator window box on the hood, a vertical panel of switchboard and
+edgewise meters and chart recorders, and a sloped benchboard with the control
+switches, M/A stations and pushbuttons laid out on a colour-coded mimic
+(red primary sodium, orange intermediate sodium, green feed, blue steam, grey
+air and gas, black electrical). Engraved nameplates, black demarcation tape
+round groups of controls, and blue label tape where the operators added their
+own notes. An alarm typer runs along the front of every board.
 
-There are four boards. Pick one with the buttons in the header or F1 to F4. A
+Each board is laid out on a 1920x1080 canvas and scaled to your display,
+borderless full screen (F11 toggles it; `RMELM_WINDOWED=1` starts in a
+window). At launch you pick **start at rated power** or **start from hot
+shutdown**, and whether random equipment failures are on. The sim runs in real
+time. HOLD pauses it, and F12 saves a screenshot (`screenshotNNN.png`).
+
+There are six boards. Pick one with the buttons in the header or F1 to F6. A
 board's button flashes when it has an unacknowledged alarm.
+
+| Key | Board | Sections |
+|-----|-------|----------|
+| F1 | Reactor | 1-1 nuclear instrumentation and protection, 1-2 reactor control, 1-3 core monitoring |
+| F2 | Heat transport | 2-1 primary, 2-2 intermediate loops and SG protection, 2-3 decay heat removal and containment isolation |
+| F3 | Turbine-generator | 3-1 feedwater and main steam, 3-2 turbine and condenser, 3-3 generator |
+| F4 | Electrical | 4-1 distribution, 4-2 emergency power and DC |
+| F5 | Auxiliary | 5-1 sodium auxiliaries, 5-2 containment and radiation, 5-3 plant services and fire protection |
+| F6 | Remote shutdown panel | RSP-1 reactor and decay heat removal, RSP-2 emergency power, steam and feed |
 
 ### Controls
 
 - **Pistol-grip and J-handle switches.** Click the left half of a switch to
   turn it left (STOP, TRIP, OFF, SHUT), or the right half to turn it right
-  (START, CLOSE, ON, OPEN). It springs back to centre. Green lamp = stopped/open, red = running/closed.
-  The small target flag between the lamps shows the last operation, so a
-  green lamp next to a red flag means the equipment tripped on its own. Right
-  click a diesel generator switch for **pull-to-lock**, which blocks its
-  automatic start.
-- **Key switches.** Click to turn them (bypasses, the RPS key, the remote
-  shutdown transfer).
+  (START, CLOSE, ON, OPEN). It springs back to centre. Green lamp =
+  stopped/open, red = running/closed; a third lamp, where there is one, shows
+  a trip (amber) or cranking (white). The small target flag under the handle
+  shows the last operation, so a green lamp next to a red flag means the
+  equipment tripped on its own. Right click a diesel generator switch for
+  **pull-to-lock**, which blocks its automatic start.
+- **M/A stations** (manual/automatic controllers). The scale shows the
+  process value (red pointer) against the setpoint (black index); the SET
+  window shows the setpoint and OUT the controller output. A puts it in
+  automatic, M in manual. The arrows raise and lower the setpoint in AUTO or
+  the output in MAN, and repeat while held. Stations without A/M are manual
+  loading stations.
+- **Guarded pushbuttons.** The first click lifts the red guard for a few
+  seconds; the second pushes the button (SG isolate, loop dump, containment
+  isolation, all MSIVs).
+- **Pushbutton selectors.** A row of lamp pushbuttons; the lit one is in
+  effect (turbine speed and acceleration, channel bypass).
+- **Key switches.** Click to turn them (bypasses, the RPS key, DRACS auto, the
+  remote shutdown transfer).
 - **Rotary selectors.** Click the legend of the position you want.
 - **Annunciators** follow the ISA ringback sequence. A new alarm flashes fast
   and sounds the horn. SILENCE stops the horn. ACK makes the window steady.
   When the condition clears, the window flashes slowly until RESET. TEST
   lights every window. An alarm that clears before you ACK stays locked in.
+  Windows are backlit red (trip), amber (alarm) or white (status). Each box
+  has row letters and column numbers, so a window can be called out as
+  "1-2 B4", and each board's horn has its own pitch.
 
 ### The job
 
 The **load dispatcher** orders net output in MWe (header, DISPATCH MWE) and
 changes the order every 10 to 20 minutes, with a ramp rate. You follow it with
-the power demand (RAISE/LOWER) while automatic rod control holds the reactor
-there.
+the reactor power demand (the REACTOR POWER station on 1-2, in AUTO) while
+automatic rod control holds the reactor there. The LOAD DISPATCH box on 3-3
+shows the order and lights RAISE or LOWER when you are off it.
 
 Points:
 - one point per MWh sent out within 3% of the order (half within 10%);
@@ -93,148 +126,158 @@ Equipment fails at random, about one event every 20 minutes at power:
 - instrument air compressor failure;
 - fires in the cable spreading room, the turbine hall and the control room.
 
-### Main control board (F1)
+### Reactor board (F1)
 
-Top row, the reactor:
-
-- **Reactor**: strip chart (power in violet, core outlet in red) and LED
-  readouts: MWt, percent, period, reactivity, log power, peak fuel and clad.
-- **Full core display**: a 2-digit notch readout for each of the 55 rods
-  (00 = fully in, 40 = fully out, 4 cm per notch; rods named by grid
-  coordinates such as 16-19). A drifting rod's readout flashes red. The rod
-  select matrix has one pushbutton per rod: select one, then WITHDRAW/INSERT
-  it. The **rod block monitor** reading for the selected rod is shown below.
-- **Core monitoring**:
-  - the core fuel temperature map: 55 round gauges, one per control rod
-    cell (the rod and the six fuel channels round it, the hex version of a
-    BWR four-bundle control cell). Each reads the hottest fuel centreline
+- **1-1 Nuclear instrumentation and protection**:
+  - SRM A-D (log counts) and the startup rate in decades per minute; IRM A-H,
+    each with an upscale (amber) and downscale (white) lamp; APRM A-F; all on
+    edgewise meters, with a log power / startup rate recorder;
+  - the PPS trip status matrix: a lamp per trip function and RPS channel
+    (A1, A2, B1, B2), and the four scram group lamps (lit = energised, they
+    go out when the channel trips);
+  - on the bench: the eight IRM range switches (1-10, laid out A to H left to
+    right), the SRM and IRM detector drives, the IRM and APRM channel bypass
+    selectors (one channel per division), and the RPS channel bypass keys.
+- **1-2 Reactor control**:
+  - the **full core display**: a tile per rod with its notch (00 = fully in,
+    40 = fully out, 4 cm per notch), a green FULL IN and a red FULL OUT lamp,
+    an amber dot while it moves, flashing red when it drifts. Rods are named
+    by grid coordinates such as 16-19; hover for the group. Click a tile, or
+    a button on the **rod select matrix** below, to select a rod;
+  - reactor readouts (MWt, percent, period, reactivity, log power, outlet,
+    flow, demand), the **reactor trip first-out box** and a power / outlet
+    recorder;
+  - two manual scram buttons, one per RPS division (one gives a half scram;
+    you need both), a RESET per division, and the RPS bypass key;
+  - the **REACTOR POWER** M/A station. In AUTO, group 6 holds power at the
+    demand and the arrows set the demand; in MAN they drive group 6 a notch.
+    A scram drops it to MAN;
+  - the **gang drive**: a GROUP/ALL selector and WITHDRAW/INSERT 1 or 5
+    notches. GROUP drives the whole group of the selected rod; ALL drives
+    every rod. The rods are in six groups, numbered in withdrawal order:
+    1 safety, 2-5 shims, 6 regulating (the one automatic control drives);
+  - the rod motion lamps and pushbuttons for the selected rod (INSERT,
+    WITHDRAW, SETTLE; CONTINUOUS INSERT/WITHDRAW while held), the rod block
+    lamps (withdrawal block, RWM, RBM), rod drift with TEST and RESET, and
+    the rod worth minimizer and rod block monitor bypass keys.
+- **1-3 Core monitoring**:
+  - the core fuel temperature map: 55 round gauges, one per control rod cell
+    (the rod and the six fuel channels round it, the hex version of a BWR
+    four-bundle control cell). Each reads the hottest fuel centreline
     temperature in its cell, 300-1500 C, and its bezel flashes red above
-    1300 C. The rod's coordinates are printed on the dial. Hover over a
-    gauge for its group, notch and temperature;
+    1300 C. Hover over a gauge for its group, notch and temperature;
   - source range and APRM meters, thermal power in MWth;
-  - the **reactor mode switch**: SHUTDOWN / REFUEL / STARTUP / RUN;
+  - the key-lock **reactor mode switch**: SHUTDOWN / REFUEL / STARTUP / RUN;
   - a gang IRM range switch that sets all eight IRMs at once.
-- **Neutron monitoring and RPS**:
-  - SRM A-D (log counts), IRM A-H with their own range switches (up/down),
-    APRM A-F, all on edgewise meters;
-  - SRM and IRM detector drives (INSERT/RETRACT, one minute end to end);
-  - IRM and APRM bypass selectors, one channel per division;
-  - the four RPS scram group lamps A1, A2, B1, B2 (lit = energised, they go
-    out when the channel trips), with a bypass key for each (one per
-    division);
-  - rod worth minimizer and rod block monitor status and bypass keys.
 
-Bottom row:
+### Heat transport board (F2)
 
-- **Rod control and reactor protection**:
-  - two manual scram buttons, one per RPS division. One gives a half scram;
-    you need both for a full scram;
-  - a RESET per division (it lights when that division is tripped) and the
-    RPS bypass key;
-  - the first-out window;
-  - the rod drive: a ROD MOTION switch (GROUP or ALL) and WITHDRAW/INSERT
-    1 or 5 notches. GROUP drives the whole group of the rod selected on the
-    full core display; ALL drives every rod. The rods are in six groups,
-    numbered in withdrawal order: 1 safety, 2-5 shims, 6 regulating (the
-    one automatic control drives);
-  - AUTO/MAN and the power demand;
-  - rod control status. A scram drops rod control to MAN.
-- **Sodium pumps**: a pistol-grip switch, speed, setpoint and pony motor for
-  each of the eight pumps, plus the **master flow controller**, which sets
-  all four primary pump speeds together.
-- **Annunciators** (30 windows) with SILENCE/ACK/RESET/TEST, the
-  **isolation** panel (FIV and MSIV for each SG, SG isolate, containment
-  isolation, all-MSIV shut) and the alarm typer.
-- **Decay heat removal (DRACS)**: damper switches for the three trains, heat
-  removed, auto-open on trip, the four hydrogen-in-sodium meters, and a
-  multipoint recorder of core outlet, core inlet and the four hot legs.
+![Heat transport board](docs/gui_hts.png)
 
-### Turbine-generator and electrical board (F2)
+- **2-1 Primary**: loop and core flow dials; pump speed, hot leg and cold leg
+  temperatures and reactor sodium level in groups of edgewise meters; the
+  sodium temperature multipoint recorder and a core flow recorder. The bench
+  mimic runs from the reactor through each loop's IHX and pump. Under each
+  pump: its control switch, the pony motor, and a speed M/A station. A pump
+  station in AUTO follows the **flow master**; the master in AUTO holds core
+  flow at its setpoint, in MAN its arrows set every AUTO pump's speed.
+- **2-2 Intermediate loops and SG protection**: secondary flow and the
+  **hydrogen-in-sodium** meters, expansion tank level and pressure, secondary
+  hot and cold legs, the **leak detection** display (sodium leak, rupture
+  disc, N2 purge, dumped, refill, fire, sodium inventory per loop) and the
+  hydrogen recorder. On the bench each loop's mimic runs from its IHX to its
+  SG and back through the secondary pump, with the pump switch and speed
+  station (the secondary pumps follow the same flow master), the guarded
+  **SG ISOLATE** (blowdown and N2 purge) and **LOOP DUMP** pushbuttons, and
+  REFILL (20 minutes, refused while the SG still leaks).
+- **2-3 Decay heat removal and containment isolation**: a heat dial over each
+  DRACS damper loading station (AUTO opens the damper on a reactor trip),
+  total DRACS heat, decay heat, natural circulation and the DRACS/decay heat
+  recorder, the DRACS AUTO key; the guarded CONTAINMENT ISOLATE pushbutton
+  and its reset.
 
-![Turbine-generator and electrical board](docs/gui_tg.png)
+### Turbine-generator board (F3)
 
-- **Main turbine**:
-  - TRIP/LATCH, turning gear and auxiliary oil pump switches;
-  - speed target (0 to 1800 rpm) and acceleration (60 to 600 rpm/min)
-    selectors, with ACCEL / AT SPEED / CRITICAL SPEED lamps;
-  - stop and control valve lamps;
-  - supervisory instruments (vibration, eccentricity, bearing temperature,
-    lube oil pressure) with a multipoint supervisory recorder.
-  - Trips: overspeed 110%, vibration 7 mils, bearing 107 C, oil 0.6 bar,
-    condenser vacuum 25 kPa. The turbine will not latch without oil pressure,
-    with eccentricity over 2 mils, below 5 MPa steam or with poor vacuum. A
-    rotor left standing off the turning gear bows (eccentricity rises), and a
-    bowed rotor shakes hard through the critical speed near 1100 rpm.
-- **Generator**:
-  - MW, MVAR, kV and Hz meters;
-  - field breaker (flash it above 1500 rpm);
-  - voltage regulator AUTO/MAN with manual excitation;
-  - a **synchroscope** with dark-lamp sync lamps;
-  - AUTO SYNC, which trims the speed and closes the breaker in phase;
-  - a GEN MW / RPM strip chart.
-  - Closing the breaker by hand out of phase trips the unit.
-- **Main steam and feedwater control**: steam pressure, flow and feed
-  temperature, pressure setpoint, bypass and safety valves, feedwater in/out
-  of service and AUTO/MAN, and per SG the feed flow, valve (manual +/-),
-  steam temperature, steam flow, heat and MSIV.
-- **Feedwater, condensate, circulating water**:
-  - two 60% turbine-driven feed pumps (they need steam above 4 MPa);
-  - a 25% motor-driven startup pump;
-  - two condensate pumps, HP heaters in/out;
-  - hotwell and deaerator levels;
-  - three circulating water pumps and two vacuum pumps, condenser pressure
-    and air.
-- **Electrical one-line**, a mimic from the 345 kV grid:
-  - the switchyard breaker, main transformer, generator breaker, generator;
-  - the startup and unit auxiliary transformers and the 6.9 kV house buses
-    with the bus transfer switch. When the generator trips, the house load
-    fast-transfers to the startup transformer, unless the transfer relay
-    has a fault;
-  - three 4.16 kV essential buses with the diesels (load in MW, run,
-    out-of-service and cranking lamps, pull-to-lock);
-  - two 125 V DC divisions with battery charge, chargers and the vital AC
-    inverters. The nuclear instruments of a division go dead without its
-    inverter, and the diesels need DC to crank.
+![Turbine-generator board](docs/gui_tg.png)
 
-### Auxiliary board (F3)
+- **3-1 Feedwater and main steam**: steam pressure, steam and feed flow and
+  feed temperature dials; per SG, feed flow, steam temperature and feed valve
+  meters; hotwell and deaerator levels; steam pressure / feed flow and SG
+  steam temperature recorders. On the bench, the feed train mimic with the
+  condensate pumps, two 60% turbine-driven feed pumps (they need steam above
+  4 MPa), the 25% motor-driven startup pump, the HP heaters and the
+  FEEDWATER in/out switch; OPEN/CLOSE pushbuttons for each SG's feed and
+  steam isolation valves; a feed M/A station per SG under the **feed
+  master** (which sets the steam temperature they hold); the **throttle
+  pressure** loading station; and the guarded ALL MSIV CLOSE.
+- **3-2 Turbine and condenser**: speed dial, speed, reference and
+  acceleration readouts, ACCEL / AT SPEED / CRITICAL SPEED lamps, stop and
+  control valve lamps, supervisory meters (vibration, eccentricity, bearing,
+  oil) and recorder, condenser vacuum, air and circulating water. On the
+  bench, TRIP/LATCH, turning gear and auxiliary oil pump switches, the EHC
+  speed target (0 to 1800 rpm) and acceleration (60 to 600 rpm/min)
+  pushbuttons, the steam path mimic, and the circulating water and vacuum
+  pumps. Trips: overspeed 110%, vibration 7 mils, bearing 107 C, oil 0.6 bar,
+  condenser vacuum 25 kPa. The turbine will not latch without oil pressure,
+  with eccentricity over 2 mils, below 5 MPa steam or with poor vacuum. A
+  rotor left standing off the turning gear bows, and a bowed rotor shakes
+  hard through the critical speed near 1100 rpm.
+- **3-3 Generator**: MW, MVAR, kV and Hz meters, the **synchroscope** with
+  dark-lamp sync lamps, running and incoming volts and frequency, output
+  readouts and a GEN MW / RPM recorder. On the bench, the generator and
+  field breakers (flash the field above 1500 rpm), the voltage regulator
+  M/A station, AUTO SYNC (trims the speed and closes the breaker in phase),
+  and the load dispatch box. Closing the breaker by hand out of phase trips
+  the unit.
+
+### Electrical board (F4)
+
+![Electrical board](docs/gui_elec.png)
+
+- **4-1 Distribution**: grid, output, house load, transformer, bus and
+  essential load meters, a net output / dispatch recorder, essential bus
+  meters and status lights. On the bench, the one-line mimic from the
+  345 kV grid: the switchyard breaker, main transformer, generator breaker
+  (closed from 3-3), the startup and unit auxiliary transformers with the
+  BUS TRANSFER switch, the 6.9 kV house buses and their loads, and the
+  feeders to the three 4.16 kV essential buses. When the generator trips,
+  the house load fast-transfers to the startup transformer, unless the
+  transfer relay has a fault.
+- **4-2 Emergency power and DC**: MW and frequency meters and running,
+  cranking, out-of-service and pull-to-lock lights for each diesel; battery
+  volts, amps and charge and vital AC volts for both DC divisions, with a
+  recorder. On the bench, each essential bus with its diesel's control
+  switch and output breaker, and the DC mimic: charger, 125 V DC bus and
+  battery, inverter and 120 V vital AC bus. The nuclear instruments of a
+  division go dead without its inverter, and the diesels need DC to crank.
+
+### Auxiliary board (F5)
 
 ![Auxiliary board](docs/gui_aux.png)
 
-- **Reactor sodium, cover gas, failed fuel**:
-  - vessel sodium level (low level trips the reactor);
-  - argon cover gas pressure with AUTO/MAN and supply/vent valves;
-  - cover gas cleanup;
-  - failed fuel detection: delayed neutron detectors (trip at 2000 cps) and
-    cover gas activity, with a strip chart;
-  - the primary cold trap, oxygen and plugging temperature, and the guard
-    vessel leak alarm.
-- **Secondary sodium and SG protection**, for each loop:
-  - hydrogen meter, expansion tank level and pressure, sodium inventory;
-  - leak, rupture disc, N2 purge, dumped, refill and fire lamps;
-  - oxygen and plugging temperature;
-  - SG isolation (blowdown and N2 purge), the dump valve, the cold trap and
-    REFILL (20 minutes, refused while the SG still leaks).
-- **Trace heating**: six circuits (primary piping, the four secondary loops,
-  the dump tanks), each OFF/AUTO/ON, with kW and pipe temperature. Sodium
-  freezes at 98 C.
-- **Containment**: building pressure and temperature, primary cell oxygen and
-  temperature, the cell nitrogen supply (a primary leak cannot burn below
-  5% O2), and containment isolation.
-- **Radiation monitoring**: eight log-scale area and process monitors. A
-  high stack or hall reading isolates containment and puts the control room
-  HVAC on emergency filtration.
-- **Cooling water and instrument air**:
-  - component cooling water and service water pumps. The primary pump
-    bearings trip at 90 C without them;
-  - instrument air compressors. Below 4 bar the air-operated feed and bypass
-    valves fail as is. Below 3 bar the MSIVs drift shut and the DRACS
-    dampers fail open;
-  - control room HVAC.
-- **Fire protection**: fire lamps for eight zones and the electric and diesel
-  fire pumps. Sodium fires are not fought with water: dump the loop and let
-  the pool burn out.
+- **5-1 Sodium auxiliaries**: vessel sodium level (low level trips the
+  reactor), argon cover gas pressure and activity, delayed neutron detectors
+  (trip at 2000 cps), primary oxygen, plugging temperature and inventory,
+  secondary plugging temperatures, trace heating pipe temperatures and kW,
+  and the failed fuel recorder. On the bench, the cover gas mimic with the
+  supply, vent and cleanup switches and pressure control AUTO/MAN, the cold
+  trap switches (primary and each loop), and the six trace heating
+  selectors (OFF/AUTO/ON; sodium freezes at 98 C).
+- **5-2 Containment and radiation**: building pressure and temperature,
+  primary cell oxygen and temperature, containment status lights, eight
+  log-scale area and process radiation monitors and their recorder. On the
+  bench, the cell nitrogen supply (a primary leak cannot burn below 5% O2)
+  and the control room HVAC. A high stack or hall reading isolates
+  containment and puts the control room HVAC on emergency filtration.
+- **5-3 Plant services and fire protection**: component cooling and primary
+  pump bearing temperatures (they trip at 90 C without cooling), instrument
+  air, and the fire detection windows. On the bench, the component cooling,
+  service water, air compressor and fire pump switches. Below 4 bar of air
+  the feed and bypass valves fail as is; below 3 bar the MSIVs drift shut and
+  the DRACS dampers fail open. Sodium fires are not fought with water: dump
+  the loop and let the pool burn out.
 
-### Remote shutdown panel (F4)
+### Remote shutdown panel (F6)
 
 ![Remote shutdown panel](docs/gui_rsp.png)
 
@@ -252,7 +295,7 @@ The panel has:
 - the motor-driven feed pump, feedwater and turbine trip.
 
 The evacuation procedure is printed on the panel. When the fire is out,
-RETURN TO MAIN CONTROL ROOM, then turn the key back to MCR.
+CREW RETURN TO MAIN CONTROL RM, then turn the key back to MCR.
 
 ### Starting up from hot shutdown
 
@@ -263,34 +306,37 @@ the sodium is isothermal at 380 C with the pumps running, feedwater is out of
 service, the motor-driven feed pump runs, the turbine is on its turning gear
 and the mode switch is in SHUTDOWN.
 
-1. Turn the mode switch to STARTUP. The SRM and IRM detectors are in.
-2. Select a group 1 rod on the full core display (hover to see a rod's
-   group), set ROD MOTION to GROUP and withdraw it fully: WITHDRAW 5 NOTCH
-   until the FULL OUT lamp lights. The rods take about a minute to travel.
-3. Set ROD MOTION to ALL and withdraw 5 notches at a time. Below 20% power
+1. Turn the mode switch (1-3) to STARTUP. The SRM and IRM detectors are in.
+2. Select a group 1 rod on the full core display or the rod select matrix
+   (hover to see a rod's group), set the GANG DRIVE selector to GROUP and
+   withdraw it fully: WITHDRAW 5 NOTCH until the FULL OUT lamp lights. The
+   rods take about a minute to travel.
+3. Set GANG DRIVE to ALL and withdraw 5 notches at a time. Below 20% power
    the rod worth minimizer wants group 1 fully out first and groups 2-5
    within 5 notches of each other, which ALL does for you. Watch the SRM
-   count rate and the period, and go to single notches as it shortens. The
-   core goes critical with the rods roughly half out. A period
-   shorter than 10 s trips the reactor.
-4. As power rises, range the IRMs up (the gang switch, or each channel's
-   arrows) to keep them between about 15 and 100. Above 108 withdrawal is
-   blocked, and above 120 a channel trips its RPS division.
-5. Set the demand to a few percent and select AUTO. Automatic rod control
-   limits the startup rate to a period of about 60 s or longer.
-6. On the turbine board, put the feedwater in service. Raise power to about
-   10% APRM and turn the mode switch to RUN (refused below 5%, and it must
-   happen before the 15% APRM setdown trip). Retract the SRM and IRM
-   detectors.
-7. On the turbine board, with steam above 5 MPa, LATCH the turbine, set the
-   speed target to 1800 and the acceleration to 300. Above 1500 rpm, close
-   the field breaker. Then press AUTO SYNC, or watch the synchroscope and
-   close the generator breaker yourself when the pointer turns slowly
-   through 12 o'clock. The dispatcher takes over.
-8. Start the turbine feed pumps before going much above 20% (the startup pump
-   gives only 25%). Raise the demand. When the GROUP 6 AT LIMIT annunciator
-   lights, withdraw groups 2-5 a notch or two (GROUP mode) to give the
-   regulating group room.
+   count rate and the startup rate, and go to single notches as it rises.
+   The core goes critical with the rods roughly half out. A period shorter
+   than 10 s trips the reactor.
+4. As power rises, range the IRMs up (IRM RANGE - ALL on 1-3, or each
+   channel's range switch on 1-1) to keep them between about 15 and 100.
+   Above 108 withdrawal is blocked, and above 120 a channel trips its RPS
+   division.
+5. Press A on the REACTOR POWER station (1-2) and set the demand to a few
+   percent with its arrows. Automatic rod control limits the startup rate to
+   a period of about 60 s or longer.
+6. On the turbine-generator board (3-1), turn the FEEDWATER switch to IN.
+   Raise power to about 10% APRM and turn the mode switch to RUN (refused
+   below 5%, and it must happen before the 15% APRM setdown trip). Drive the
+   SRM and IRM detectors out (1-1).
+7. With steam above 5 MPa, LATCH the turbine (3-2) and press the 1800 rpm
+   speed target and 300 rpm/min acceleration. Above 1500 rpm, close the
+   FIELD BKR (3-3). Then press AUTO SYNC, or watch the synchroscope and
+   close the GEN BKR yourself when the pointer turns slowly through 12
+   o'clock. The dispatcher takes over.
+8. Start the turbine feed pumps (3-1) before going much above 20% (the
+   startup pump gives only 25%). Raise the demand. When the GROUP 6 AT LIMIT
+   annunciator (1-2) lights, withdraw groups 2-5 a notch or two (GANG DRIVE
+   GROUP) to give the regulating group room.
 
 ### Steam generator leaks
 
@@ -301,8 +347,7 @@ SODIUM HIGH alarm comes in at 0.3 ppm, when the leak is around 1 g/s. From
 there you have about 15 minutes. Isolate that SG, stop its secondary pump
 and run back to about 75%. If you don't, the leak reaches 2 kg/s, the
 rupture disc bursts, the loop's sodium is dumped and the reactor trips. A
-dumped loop can be refilled from the auxiliary board once the SG no longer
-leaks.
+dumped loop can be refilled from 2-2 once the SG no longer leaks.
 
 ### Building on Linux
 

@@ -1,15 +1,23 @@
 /*
- * RM-ELM graphical control room (raylib), drawn as a 1978 control room of
- * flat vertical boards: painted steel, engraved nameplates and Dymo labels,
- * needle and edgewise meters, red LED readouts, strip-chart and multipoint
- * recorders, pistol-grip and J-handle control switches, key switches,
- * annunciator window boxes with horn and ringback, and an alarm typer.
+ * RM-ELM graphical control room (raylib), drawn as a 1978 control room:
+ * each board is a row of system sections, each with its annunciator window
+ * box on the hood, a vertical section of switchboard and edgewise meters and
+ * recorders, and a sloped benchboard with the control switches, M/A
+ * stations and pushbuttons laid out on a colour-coded mimic. Engraved
+ * nameplates and operator label tape, red LED readouts, pistol-grip and
+ * J-handle control switches, key switches, guarded pushbuttons, an alarm
+ * typer along the front lip.
  *
- * Four boards, picked from the header (or F1-F4):
- *   MAIN              reactor, neutron monitoring, RPS, rods, pumps, isolation, DRACS
- *   TURBINE-GEN/ELEC  turbine, generator, steam and feed, condenser, electrical one-line
- *   AUXILIARY         sodium systems, SG protection, trace heating, containment,
- *                     radiation, cooling water, air, fire protection
+ * Six boards, picked from the header (or F1-F6):
+ *   REACTOR           1-1 nuclear instrumentation and protection, 1-2 reactor
+ *                     control, 1-3 core monitoring
+ *   HEAT TRANSPORT    2-1 primary, 2-2 intermediate loops and SG protection,
+ *                     2-3 decay heat removal and containment isolation
+ *   TURBINE-GEN/FEED  3-1 feedwater and main steam, 3-2 turbine and
+ *                     condenser, 3-3 generator
+ *   ELECTRICAL        4-1 distribution, 4-2 emergency power and DC
+ *   AUXILIARY         5-1 sodium auxiliaries, 5-2 containment and radiation,
+ *                     5-3 plant services and fire protection
  *   REMOTE SHUTDOWN   the panel outside the control room, for an evacuation
  */
 #include "gui.h"
@@ -27,7 +35,7 @@
 rm_plant *P;
 rm_game G;
 int input_ok = 1;
-int board = BOARD_MAIN;
+int board = BOARD_REACTOR;
 float trend[TR_N][NTR];
 int ntr = 0;
 long nsamp = 0;
@@ -35,6 +43,9 @@ char logs[NLOG][100];
 double last_log_time = -100;
 mpr MP_NA = {6, {"OUT", "IN", "HL1", "HL2", "HL3", "HL4"}, {0}, {0}};
 mpr MP_TURB = {5, {"RPM", "VIB", "ECC", "BRG", "OIL"}, {0}, {0}};
+mpr MP_H2 = {4, {"SG1", "SG2", "SG3", "SG4"}, {0}, {0}};
+mpr MP_SG = {4, {"SG1", "SG2", "SG3", "SG4"}, {0}, {0}};
+mpr MP_RAD = {6, {"CR", "HALL", "GAS", "STACK", "SEC NA", "STEAM"}, {0}, {0}};
 
 static volatile int loaded = 0;
 static int paused = 0;
@@ -82,6 +93,18 @@ static void sample(void)
     v[TR_DND] = (float)log10(fmax(P->aux.dnd, 1.0));
     v[TR_LOGPWR] = (float)log10(fmax(c->p_thermal / RM_P_RATED, 1e-10));
     v[TR_FLOW] = (float)(100 * P->W_core / rm_plant_nominal_flow());
+    double sur = isfinite(P->period) && fabs(P->period) < 1e4 ? 26.06 / P->period : 0.0;
+    v[TR_PERIOD] = (float)fmin(5.0, fmax(-1.0, sur));
+    double wf = 0, dg = 0;
+    for (int i = 0; i < RM_NLOOPS; i++) wf += P->loop[i].sg.W_fw;
+    for (int i = 0; i < 3; i++) dg += P->tg.dg_mw[i];
+    v[TR_FEED] = (float)wf;
+    v[TR_DRACS] = (float)(P->Q_dracs / 1e6);
+    v[TR_DECAY] = (float)(c->p_decay / 1e6);
+    v[TR_NET] = (float)fmax(P->P_net / 1e6, 0.0);
+    v[TR_DEMAND] = (float)(G.on_line ? G.demand : 0.0);
+    v[TR_DGMW] = (float)dg;
+    v[TR_BATT] = (float)(100 * P->tg.batt[0]);
     for (int k = 0; k < TR_N; k++) {
         memmove(trend[k], trend[k] + 1, sizeof(float) * (NTR - 1));
         trend[k][NTR - 1] = v[k];
@@ -94,13 +117,23 @@ static void sample(void)
     float tb[5] = {(float)(t->speed / 20.0), (float)(t->vib * 10.0), (float)(t->ecc * 10.0), (float)(t->brg_T / 1.2),
                    (float)(t->lube_p / 0.03)};
     mpr_push(&MP_TURB, tb);
+    float h2[4], sg[4], rad[6];
+    for (int i = 0; i < RM_NLOOPS; i++) {
+        h2[i] = (float)(100 * P->loop[i].sg.h2);
+        sg[i] = (float)((P->loop[i].sg.T_steam - 573.15) / 3.0);
+    }
+    mpr_push(&MP_H2, h2);
+    mpr_push(&MP_SG, sg);
+    static const int rk[6] = {RM_RAD_CR, RM_RAD_HALL, RM_RAD_GAS, RM_RAD_STACK, RM_RAD_SECNA, RM_RAD_STEAM};
+    for (int i = 0; i < 6; i++) rad[i] = (float)((log10(fmax(P->aux.rad[rk[i]], 0.01)) + 2.0) / 6.0 * 100.0);
+    mpr_push(&MP_RAD, rad);
     if (ntr < NTR) ntr++;
     nsamp++;
 }
 
 /* ---- header with the board selector -------------------------------------------------- */
-static const char *board_name[NBOARDS] = {"MAIN CONTROL BOARD", "TURBINE-GENERATOR & ELECTRICAL", "AUXILIARY BOARD",
-                                          "REMOTE SHUTDOWN PANEL"};
+static const char *board_name[NBOARDS] = {"REACTOR BOARD", "HEAT TRANSPORT BOARD", "TURBINE-GENERATOR BOARD",
+                                          "ELECTRICAL BOARD", "AUXILIARY BOARD", "REMOTE SHUTDOWN PANEL"};
 
 static void header(void)
 {
@@ -127,15 +160,16 @@ static void header(void)
     dymo(x0 + 6 * dx, 4, "MWH SENT");
     readout(x0 + 6 * dx, 18, 16, 6, "%6.0f", fmin(G.mwh, 999999.0));
 
-    static const char *tab[NBOARDS] = {"F1 MAIN\nBOARD", "F2 TURB-GEN\nELECTRICAL", "F3 AUX\nBOARD", "F4 REMOTE\nSHUTDOWN"};
+    static const char *tab[NBOARDS] = {"F1 REACTOR",     "F2 HEAT\nTRANSPORT", "F3 TURBINE\nGEN-FEED",
+                                       "F4 ELEC-\nTRICAL", "F5 AUX-\nILIARY",    "F6 REMOTE\nSHUTDOWN"};
     for (int b = 0; b < NBOARDS; b++) {
         int alert = b != board && ann_board_alerting(b);
         Color lens = alert ? L_AMB : L_WHT;
-        if (lampbutton((Rectangle){1236 + b * 104, 4, 100, 38}, tab[b], lens, b == board || (alert && blink_fast()))) board = b;
+        if (lampbutton((Rectangle){1186 + b * 90, 4, 86, 38}, tab[b], lens, b == board || (alert && blink_fast()))) board = b;
     }
-    if (lampbutton((Rectangle){1660, 6, 60, 34}, "HOLD", L_AMB, paused)) paused = !paused;
-    dymo(1730, 6, "F11 FULL SCREEN");
-    dymo(1730, 24, "F12 PHOTO");
+    if (lampbutton((Rectangle){1730, 6, 56, 34}, "HOLD", L_AMB, paused)) paused = !paused;
+    dymo(1794, 6, "F11 FULL SCREEN");
+    dymo(1794, 24, "F12 PHOTO");
 }
 
 /* smoke in the control room: thickens as the fire burns, then the crew is out */
@@ -154,7 +188,7 @@ static void smoke_overlay(void)
         DrawRectangleLinesEx(b, 3, L_RED);
         ctext("CONTROL ROOM EVACUATED - SMOKE", CW / 2, b.y + 26, 20, L_RED);
         ctext("THE MAIN BOARDS CANNOT BE WORKED FROM HERE.", CW / 2, b.y + 66, 10, L_WHT);
-        ctext("GO TO THE REMOTE SHUTDOWN PANEL (F4) AND TAKE CONTROL WITH THE TRANSFER KEY.", CW / 2, b.y + 84, 10, L_WHT);
+        ctext("GO TO THE REMOTE SHUTDOWN PANEL (F6) AND TAKE CONTROL WITH THE TRANSFER KEY.", CW / 2, b.y + 84, 10, L_WHT);
         return;
     }
     if (a->fire[RM_FIRE_CR]) {
@@ -194,13 +228,13 @@ static int start_menu(void)
         "YOU HAVE THE WATCH. THE LOAD DISPATCHER WILL ORDER NET OUTPUT IN MWE:",
         "FOLLOW IT WITH THE POWER DEMAND. POINTS FOR EVERY MWH SENT ON TARGET,",
         "PENALTIES FOR TRIPS. EQUIPMENT CAN FAIL AT ANY TIME - WATCH THE",
-        "ANNUNCIATORS (SILENCE, ACK, RESET), THE ALARM TYPER AND ALL THREE BOARDS.",
+        "ANNUNCIATORS (SILENCE, ACK, RESET), THE ALARM TYPER AND ALL FIVE BOARDS.",
         "",
         "HOT SHUTDOWN START: MODE SWITCH TO STARTUP, WITHDRAW ROD GROUP 1, THEN",
-        "GROUPS 2-5 TOGETHER (ROD MOTION ALL). RANGE THE IRMS UP AS POWER RISES",
+        "GROUPS 2-5 TOGETHER (GANG DRIVE ALL). RANGE THE IRMS UP AS POWER RISES",
         "(THEY TRIP ABOVE 120). START FEEDWATER, GO TO RUN BETWEEN 5 AND 15% APRM.",
-        "ON THE TURBINE BOARD: LATCH, ROLL TO 1800 RPM, CLOSE THE FIELD BREAKER AND",
-        "SYNCHRONISE (AUTO SYNC OR BY HAND ON THE SYNCHROSCOPE). THEN RAISE POWER.",
+        "ON THE TURBINE-GENERATOR BOARD: LATCH, ROLL TO 1800 RPM, CLOSE THE FIELD",
+        "BREAKER AND SYNCHRONISE (AUTO SYNC OR BY HAND). THEN RAISE POWER.",
     };
     for (int i = 0; i < 10; i++) text(brief[i], x, y + i * 16, 10, INK);
     y += 190;
@@ -225,19 +259,13 @@ static void draw_board(void)
     ClearBackground(WALL);
     header();
     int mcr_ok = !(P->aux.evacuated || P->aux.rsp_control);
+    input_ok = mcr_ok;
     switch (board) {
-    case BOARD_MAIN:
-        input_ok = mcr_ok;
-        draw_main();
-        break;
-    case BOARD_TG:
-        input_ok = mcr_ok;
-        draw_tg();
-        break;
-    case BOARD_AUX:
-        input_ok = mcr_ok;
-        draw_auxb();
-        break;
+    case BOARD_REACTOR: draw_reactor(); break;
+    case BOARD_HTS: draw_hts(); break;
+    case BOARD_TG: draw_tg(); break;
+    case BOARD_ELEC: draw_elec(); break;
+    case BOARD_AUX: draw_auxb(); break;
     default:
         input_ok = 1;
         draw_rsp();
@@ -279,18 +307,23 @@ int main(void)
         start_hot = st && st[0] == 'h';
         started = 1;
     }
-    /* RMELM_BOARD=main|tg|aux|rsp picks the board shown first */
+    /* RMELM_BOARD=reactor|hts|tg|elec|aux|rsp picks the board shown first */
     const char *bd = getenv("RMELM_BOARD");
-    if (bd) board = bd[0] == 't' ? BOARD_TG : bd[0] == 'a' ? BOARD_AUX : bd[0] == 'r' ? BOARD_RSP : BOARD_MAIN;
+    if (bd) {
+        if (!strcmp(bd, "rsp") || !strncmp(bd, "remote", 6)) board = BOARD_RSP;
+        else if (bd[0] == 'h') board = BOARD_HTS;
+        else if (bd[0] == 't') board = BOARD_TG;
+        else if (bd[0] == 'e') board = BOARD_ELEC;
+        else if (bd[0] == 'a') board = BOARD_AUX;
+        else board = BOARD_REACTOR;
+    }
     if (getenv("RMELM_FAILURES")) random_failures = atoi(getenv("RMELM_FAILURES"));
     if (started) pthread_create(&th, NULL, loader, NULL);
     while (!WindowShouldClose() && !quit) {
         if (IsKeyPressed(KEY_F11)) ToggleBorderlessWindowed();
         if (IsKeyPressed(KEY_ESCAPE) && !started) quit = 1;
-        if (IsKeyPressed(KEY_F1)) board = BOARD_MAIN;
-        if (IsKeyPressed(KEY_F2)) board = BOARD_TG;
-        if (IsKeyPressed(KEY_F3)) board = BOARD_AUX;
-        if (IsKeyPressed(KEY_F4)) board = BOARD_RSP;
+        for (int b = 0; b < NBOARDS; b++)
+            if (IsKeyPressed(KEY_F1 + b)) board = b;
         /* letterbox the canvas and map the mouse back onto it */
         float sw = (float)GetScreenWidth(), sh = (float)GetScreenHeight();
         float sc = fminf(sw / CW, sh / CH);
@@ -306,7 +339,7 @@ int main(void)
             msg_seen = P->nmsg;
             if (start_hot) {
                 logmsg("Unit in hot shutdown: all rods in, sodium at 380 C");
-                logmsg("Mode switch to STARTUP, then withdraw SAFETY bank and shims");
+                logmsg("Mode switch to STARTUP, then withdraw rod group 1, then groups 2-5");
             } else {
                 logmsg("Unit at rated power, turbine on line");
                 logmsg("Follow the load dispatcher's orders");
@@ -320,6 +353,7 @@ int main(void)
             int n = 0;
             while (acc >= DT && n < 8) {
                 rm_plant_step(P, DT);
+                controls_step();
                 rm_game_step(&G, P, DT);
                 acc -= DT;
                 n++;

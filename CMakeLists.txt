@@ -115,8 +115,8 @@ if(RMELM_GUI)
     endif()
   endif()
   find_package(Threads REQUIRED)
-  add_executable(rmelm_gui src/gui/rmelm_gui.c src/gui/gui_widgets.c src/gui/gui_ann.c src/gui/gui_main.c
-    src/gui/gui_tg.c src/gui/gui_aux.c src/gui/gui_rsp.c)
+  add_executable(rmelm_gui src/gui/rmelm_gui.c src/gui/gui_widgets.c src/gui/gui_ann.c src/gui/gui_board.c
+    src/gui/gui_reactor.c src/gui/gui_hts.c src/gui/gui_tg.c src/gui/gui_elec.c src/gui/gui_aux.c src/gui/gui_rsp.c)
   target_link_libraries(rmelm_gui PRIVATE rmelm_core raylib Threads::Threads)
   if(NOT MSVC)
     # raylib's headers are not strict-C17 clean

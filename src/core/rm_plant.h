@@ -57,6 +57,7 @@ typedef struct {
     double h2;                /* hydrogen in the secondary sodium, ppm (hydrogen meter) */
     int disc_burst;           /* sodium-side rupture disc has gone */
     int n2_purge;             /* nitrogen purge of the blown-down water side */
+    int fw_manual;            /* this SG's feed regulating valve station in MANUAL */
 } rm_sg;
 
 typedef struct {
@@ -230,6 +231,7 @@ typedef struct {
     int dracs_auto;           /* dampers open automatically on reactor trip */
     double dracs_damper[3];   /* 0..1 */
     double dracs_damper_set[3];
+    int dracs_man[3];         /* train's damper loading station in MANUAL: no auto-open on trip */
     double Q_dracs;           /* W removed */
     double Q_dracs_train[3];
     double W_dracs;           /* in-vessel natural circulation through the DRACS coolers, kg/s */

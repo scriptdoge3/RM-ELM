@@ -391,7 +391,7 @@ static void steam_side(rm_plant *p, double dt)
         rm_sg *s = &p->loop[i].sg;
         int path = !s->isolated && s->fiv_open && s->msiv_open && !p->loop[i].dumped;
         /* air-operated feed regulating valves lock in place without instrument air */
-        if (p->auto_fw && p->fw_on && path && p->aux.air_p >= 4.0) {
+        if (p->auto_fw && !s->fw_manual && p->fw_on && path && p->aux.air_p >= 4.0) {
             double Tc = rm_na_T(p->loop[i].cold.h[RM_PIPE_N - 1]);
             double e = (Tc - T_COLD0) / 100.0;
             double es = (s->T_steam - p->T_steam_set - 15.0) / 100.0;
@@ -518,7 +518,7 @@ static void dracs_dampers(rm_plant *p, double dt)
 {
     rm_core *c = &p->core;
     for (int i = 0; i < 3; i++) {
-        if (p->dracs_auto && c->scram) p->dracs_damper_set[i] = 1.0;
+        if (p->dracs_auto && !p->dracs_man[i] && c->scram) p->dracs_damper_set[i] = 1.0;
         /* the damper actuators are held shut by air: they fail open */
         if (p->aux.air_p < 3.0) p->dracs_damper_set[i] = 1.0;
         p->dracs_damper[i] += (p->dracs_damper_set[i] - p->dracs_damper[i]) * fmin(1.0, dt / 20.0);

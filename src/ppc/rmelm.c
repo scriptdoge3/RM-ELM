@@ -303,8 +303,10 @@ static void command(rm_plant *p, char *line, int *quit)
             logmsg(c, "AUTO ROD CONTROL: REG BANK HOLDS %.0f %% POWER", v);
         }
     } else if (!strcmp(a, "DRACS") && n >= 2) {
-        if (!strcmp(b, "AUTO")) p->dracs_auto = 1;
-        else {
+        if (!strcmp(b, "AUTO")) {
+            p->dracs_auto = 1;
+            for (int i = 0; i < 3; i++) p->dracs_man[i] = 0;
+        } else {
             p->dracs_auto = 0;
             for (int i = 0; i < 3; i++) p->dracs_damper_set[i] = !strcmp(b, "OPEN") ? 1.0 : 0.0;
         }
