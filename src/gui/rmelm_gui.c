@@ -468,6 +468,13 @@ int main(void)
         draw_annunciators((Rectangle){10, 494, 870, 80});
         draw_log((Rectangle){10, 582, 870, 208});
         EndDrawing();
+        if (IsKeyPressed(KEY_F12)) {
+            static int nshot = 0;
+            char fn[64];
+            snprintf(fn, sizeof fn, "rmelm_%03d.png", ++nshot);
+            TakeScreenshot(fn);
+            logmsg("Screenshot saved: %s", fn);
+        }
         if (shot && P->t >= shot_at) {
             TakeScreenshot("rmelm_screenshot.png");
             break;

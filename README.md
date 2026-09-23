@@ -29,14 +29,16 @@ used. Force C with `-DRMELM_USE_ASM=OFF`.
 ./build/rmelm_gui
 ```
 
-![RM-ELM control room](docs/gui.png)
+![RM-ELM control room at full power](docs/gui.png)
+
+![Two primary pumps stopped: the reactor trips](docs/gui_trip.png)
 
 A point-and-click window: reactor panel with a live power/temperature
 trend, a plant diagram (pipes coloured by temperature, click a pump to start
 or stop it), a big SCRAM button, rod bank controls, automatic power control
 with a setpoint, turbine, DRACS and failure buttons, annunciator lights and a
 message log. The buttons along the top set simulation speed (x1 to x16) or
-pause.
+pause. F12 saves a screenshot.
 
 The first `cmake` configure downloads raylib 5.5 automatically (or uses one
 already installed). On Linux you need the X11/OpenGL development packages:
