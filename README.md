@@ -61,9 +61,18 @@ console move a whole bank and keep each rod's offset. REG bank rods can only
 be moved by hand after you select MAN.
 
 The first `cmake` configure downloads raylib 5.5 automatically (or uses one
-already installed). On Linux you need the X11/OpenGL development packages:
-`sudo apt install libgl-dev libx11-dev libxrandr-dev libxinerama-dev
-libxcursor-dev libxi-dev`. To skip the GUI: `-DRMELM_GUI=OFF`.
+already installed). On Linux you need the X11/OpenGL development packages,
+plus the Wayland ones if you run a Wayland desktop. The GUI then talks to the
+compositor natively instead of going through XWayland:
+
+- Debian/Ubuntu: `sudo apt install libgl-dev libx11-dev libxrandr-dev
+  libxinerama-dev libxcursor-dev libxi-dev libwayland-dev libxkbcommon-dev
+  wayland-protocols`
+- Arch: `sudo pacman -S --needed base-devel cmake git libx11 libxrandr
+  libxinerama libxcursor libxi mesa wayland wayland-protocols libxkbcommon`
+
+CMake prints `RM-ELM: GUI with native Wayland and X11` when it found the
+Wayland files. To skip the GUI: `-DRMELM_GUI=OFF`.
 
 The GUI uses an OpenGL 2.1 context, which almost every driver supports. To
 build for OpenGL 3.3 core instead: `-DRMELM_GL33=ON`.

@@ -14,6 +14,7 @@ option(RMELM_BUILD_TESTS "Build the test programs" ON)
 option(RMELM_GUI "Build the graphical control room (raylib)" ON)
 # The panels are plain 2D shapes, so default to an OpenGL 2.1 context: it opens
 # on almost every driver, where a 3.3 core context is refused by some.
+option(RMELM_WAYLAND "Build the GUI with native Wayland support when available" ON)
 option(RMELM_GL33 "Build raylib for OpenGL 3.3 core instead of 2.1" OFF)
 
 # The assembly kernels follow the System V AMD64 ABI and are written in GAS
@@ -74,6 +75,22 @@ if(RMELM_GUI)
     include(FetchContent)
     set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
     set(BUILD_GAMES OFF CACHE BOOL "" FORCE)
+    # Native Wayland: without it GLFW runs through XWayland's GLX, which some
+    # drivers (notably NVIDIA on Wayland) refuse. GLFW picks Wayland at run
+    # time when WAYLAND_DISPLAY is set and falls back to X11 otherwise.
+    if(RMELM_WAYLAND AND UNIX AND NOT APPLE)
+      find_package(PkgConfig QUIET)
+      find_program(RMELM_WAYLAND_SCANNER wayland-scanner)
+      if(PKG_CONFIG_FOUND AND RMELM_WAYLAND_SCANNER)
+        pkg_check_modules(RMELM_WL QUIET wayland-client wayland-cursor wayland-egl xkbcommon)
+      endif()
+      if(RMELM_WL_FOUND)
+        set(GLFW_BUILD_WAYLAND ON CACHE BOOL "" FORCE)
+        message(STATUS "RM-ELM: GUI with native Wayland and X11")
+      else()
+        message(STATUS "RM-ELM: Wayland dev files not found, GUI is X11 only")
+      endif()
+    endif()
     if(RMELM_GL33)
       set(OPENGL_VERSION "3.3" CACHE STRING "" FORCE)
     else()
