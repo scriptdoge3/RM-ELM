@@ -125,7 +125,7 @@ static void conditions(void)
     an(M, 1, L_RED, "ROD", "DRIFT", drift);
     an(M, 0, L_AMB, "RWM", "ROD BLOCK", rwm_block);
     an(M, 0, L_AMB, "RBM", "UPSCALE", rbm_hi);
-    an(M, 0, L_AMB, "REG BANK", "AT LIMIT", P->auto_rod && !c->scram && (reg < 0.5 || reg > RM_ACTIVE_H - 0.5));
+    an(M, 0, L_AMB, "GROUP 6 (REG)", "AT LIMIT", P->auto_rod && !c->scram && (reg < 0.5 || reg > RM_ACTIVE_H - 0.5));
     an(M, 0, L_AMB, "CORE FLOW", "LOW", P->W_core < 0.9 * rm_plant_nominal_flow());
     an(M, 0, L_AMB, "NA PUMP", "OFF", pumps_off > 0);
     an(M, 0, L_AMB, "CORE OUTLET", "TEMP HIGH", P->T_core_out > 833.15);

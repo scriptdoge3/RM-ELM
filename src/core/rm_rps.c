@@ -229,14 +229,24 @@ int rm_plant_rod_permit(const rm_plant *p, int bank, int rod, double target, cha
     /* rod worth minimizer: banked withdrawal sequence below 20% power */
     if (!m->rwm_bypass && rm_plant_aprm(p) < 20.0 && bk >= BANK_SHIM_A && bk <= BANK_SHIM_D) {
         if (rm_core_bank_pos(c, BANK_SAFETY) > 0.5) {
-            snprintf(why, nwhy, "RWM: WITHDRAW THE SAFETY BANK FULLY FIRST");
+            snprintf(why, nwhy, "RWM: WITHDRAW GROUP 1 (SAFETY) FULLY FIRST");
             return 0;
         }
+        /* compare with where the other shim groups are heading, so they can be driven together */
         double most_in = 0;
-        for (int b = BANK_SHIM_A; b <= BANK_SHIM_D; b++)
-            if (b != bk || rod >= 0) most_in = fmax(most_in, rm_core_bank_pos(c, b));
+        for (int b = BANK_SHIM_A; b <= BANK_SHIM_D; b++) {
+            if (b == bk && rod < 0) continue;
+            double t = 0;
+            int n = 0;
+            for (int k = 0; k < c->nctrl; k++)
+                if (c->ctrl_bank[k] == b) {
+                    t += c->rod_target[k];
+                    n++;
+                }
+            most_in = fmax(most_in, n ? t / n : 0.0);
+        }
         if (target < most_in - 20.0) {
-            snprintf(why, nwhy, "RWM: SEQUENCE ERROR - KEEP SHIM BANKS WITHIN 5 NOTCHES");
+            snprintf(why, nwhy, "RWM: SEQUENCE ERROR - KEEP GROUPS 2-5 WITHIN 5 NOTCHES");
             return 0;
         }
     }

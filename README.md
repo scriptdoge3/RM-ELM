@@ -105,11 +105,12 @@ Top row, the reactor:
   select matrix has one pushbutton per rod: select one, then WITHDRAW/INSERT
   it. The **rod block monitor** reading for the selected rod is shown below.
 - **Core monitoring**:
-  - the core temperature map: 108 small round gauges, one per 2x2 group of
-    neighbouring fuel channels (three channels where a control rod takes
-    the fourth place). It reads mixed outlet temperature
-    (450-600 C) or hottest cladding (450-700 C). The bezel flashes red near
-    the top of the scale. Hover over a gauge to read its four channels;
+  - the core fuel temperature map: 55 round gauges, one per control rod
+    cell (the rod and the six fuel channels round it, the hex version of a
+    BWR four-bundle control cell). Each reads the hottest fuel centreline
+    temperature in its cell, 300-1500 C, and its bezel flashes red above
+    1300 C. The rod's coordinates are printed on the dial. Hover over a
+    gauge for its group, notch and temperature;
   - source range and APRM meters, thermal power in MWth;
   - the **reactor mode switch**: SHUTDOWN / REFUEL / STARTUP / RUN;
   - a gang IRM range switch that sets all eight IRMs at once.
@@ -131,7 +132,12 @@ Bottom row:
   - a RESET per division (it lights when that division is tripped) and the
     RPS bypass key;
   - the first-out window;
-  - bank withdraw/insert buttons, AUTO/MAN and the power demand;
+  - the rod drive: a ROD MOTION switch (GROUP or ALL) and WITHDRAW/INSERT
+    1 or 5 notches. GROUP drives the whole group of the rod selected on the
+    full core display; ALL drives every rod. The rods are in six groups,
+    numbered in withdrawal order: 1 safety, 2-5 shims, 6 regulating (the
+    one automatic control drives);
+  - AUTO/MAN and the power demand;
   - rod control status. A scram drops rod control to MAN.
 - **Sodium pumps**: a pistol-grip switch, speed, setpoint and pony motor for
   each of the eight pumps, plus the **master flow controller**, which sets
@@ -258,12 +264,15 @@ service, the motor-driven feed pump runs, the turbine is on its turning gear
 and the mode switch is in SHUTDOWN.
 
 1. Turn the mode switch to STARTUP. The SRM and IRM detectors are in.
-2. Withdraw the SAFETY bank fully (OUT 20 until the TOP lamp).
-3. Withdraw the shim banks in turn. The rod worth minimizer keeps them
-   within 20 cm (5 notches) of each other below 20% power, so step A, B, C,
-   D 20 cm at a time. Watch the SRM count rate and the period. The core goes
-   critical with the shims at about 72 cm. A period shorter than 10 s trips
-   the reactor.
+2. Select a group 1 rod on the full core display (hover to see a rod's
+   group), set ROD MOTION to GROUP and withdraw it fully: WITHDRAW 5 NOTCH
+   until the FULL OUT lamp lights. The rods take about a minute to travel.
+3. Set ROD MOTION to ALL and withdraw 5 notches at a time. Below 20% power
+   the rod worth minimizer wants group 1 fully out first and groups 2-5
+   within 5 notches of each other, which ALL does for you. Watch the SRM
+   count rate and the period, and go to single notches as it shortens. The
+   core goes critical with the rods roughly half out. A period
+   shorter than 10 s trips the reactor.
 4. As power rises, range the IRMs up (the gang switch, or each channel's
    arrows) to keep them between about 15 and 100. Above 108 withdrawal is
    blocked, and above 120 a channel trips its RPS division.
@@ -279,8 +288,9 @@ and the mode switch is in SHUTDOWN.
    close the generator breaker yourself when the pointer turns slowly
    through 12 o'clock. The dispatcher takes over.
 8. Start the turbine feed pumps before going much above 20% (the startup pump
-   gives only 25%). Raise the demand. When the REG BANK AT LIMIT annunciator
-   lights, pull the shims a little to give the regulating bank room.
+   gives only 25%). Raise the demand. When the GROUP 6 AT LIMIT annunciator
+   lights, withdraw groups 2-5 a notch or two (GROUP mode) to give the
+   regulating group room.
 
 ### Steam generator leaks
 

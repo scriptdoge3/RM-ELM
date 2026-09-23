@@ -13,12 +13,13 @@
 #include <stdio.h>
 #include <string.h>
 
+/* rod groups, numbered in withdrawal order: 1 safety, 2-5 shims, 6 regulating */
 static const char *bank_name[RM_NBANKS] = {"REG", "SHIM A", "SHIM B", "SHIM C", "SHIM D", "SAFETY"};
+static int group_of(int bank) { return bank == BANK_SAFETY ? 1 : (bank == BANK_REG ? 6 : bank + 1); }
 static const Color BANK_C[RM_NBANKS] = {
     {240, 240, 230, 255}, {250, 200, 60, 255}, {90, 200, 110, 255},
     {80, 150, 230, 255}, {200, 120, 230, 255}, {230, 60, 50, 255},
 };
-static const char *bank_short[RM_NBANKS] = {"REG", "A", "B", "C", "D", "SAFE"};
 
 /* ---- reactor: recorder and readouts ------------------------------------------ */
 static void draw_reactor(Rectangle r)
@@ -167,11 +168,13 @@ static void draw_rodselect(Rectangle r)
     dymo(x + 90, y, "NOTCH");
     if (s >= 0) readout(x + 90, y + 16, 16, 2, "%02d", notch(c->rod_ins[s]));
     else readout(x + 90, y + 16, 16, 2, "--");
-    dymo(x + 140, y, "BANK");
+    dymo(x + 140, y, "GROUP");
     DrawRectangleRec((Rectangle){x + 140, y + 16, 60, 26}, BEZEL);
     if (s >= 0) {
         DrawRectangleRec((Rectangle){x + 143, y + 19, 54, 20}, BANK_C[c->ctrl_bank[s]]);
-        ctext(bank_short[c->ctrl_bank[s]], x + 170, y + 24, 10, INK);
+        char gb[16];
+        snprintf(gb, sizeof gb, "%d", group_of(c->ctrl_bank[s]));
+        ctext(gb, x + 170, y + 24, 10, INK);
     }
     const char *lab[4] = {"WITHDRAW\n1 NOTCH", "INSERT\n1 NOTCH", "WITHDRAW\n5 NOTCH", "INSERT\n5 NOTCH"};
     const int dn[4] = {1, -1, 5, -5};
@@ -185,7 +188,7 @@ static void draw_rodselect(Rectangle r)
             double target = RM_ACTIVE_H - NOTCH_CM * nt;
             char why[80];
             if (c->ctrl_bank[s] == BANK_REG && P->auto_rod && !c->scram)
-                logmsg("ROD %s IS IN REG BANK - SELECT MAN FIRST", rod_id[s]);
+                logmsg("ROD %s IS IN GROUP 6 ON AUTO - SELECT MAN FIRST", rod_id[s]);
             else if (!rm_plant_rod_permit(P, -1, s, target, why, sizeof why)) logmsg("%s", why);
             else rm_core_rod_move(c, s, target);
         }
@@ -202,7 +205,8 @@ static void draw_rodselect(Rectangle r)
 
     if (hover >= 0) {
         char tip[80];
-        snprintf(tip, sizeof tip, "ROD %s  %s  NOTCH %02d  (%.0f CM IN)", rod_id[hover], bank_name[c->ctrl_bank[hover]],
+        snprintf(tip, sizeof tip, "ROD %s  GROUP %d (%s)  NOTCH %02d  (%.0f CM IN)", rod_id[hover],
+                 group_of(c->ctrl_bank[hover]), bank_name[c->ctrl_bank[hover]],
                  notch(c->rod_ins[hover]), c->rod_ins[hover]);
         tooltip(tip, r);
     }
@@ -242,58 +246,51 @@ void core_statistics(void)
     CS_margin_min = CS.margin_min;
 }
 
-/* ---- core temperature map: one small gauge per 2x2 group of channels ------------------- */
-#define MAXGRP 160
+/* ---- core fuel temperature map: one gauge per control rod cell ------------------------ */
+/* The rods sit on an index-7 sub-lattice, so the core divides into cells of
+ * a rod and the six fuel channels round it (the hex version of a BWR
+ * four-bundle control cell). Each gauge reads the hottest fuel centreline
+ * temperature in its cell; edge channels go to the nearest rod. */
 static struct {
-    int n;
-    int nm[MAXGRP];
-    int ch[MAXGRP][4];
-    double x[MAXGRP], y[MAXGRP];   /* pitch units */
+    int ready;
+    int n[128];
+    int ch[128][16];
     double ext;
-} GR;
+} CELL;
 
-static int floordiv2(int a) { return a >= 0 ? a / 2 : -((1 - a) / 2); }
-
-static void group_channels(void)
+static void cell_channels(void)
 {
     rm_core *c = &P->core;
     rm_hexgrid *g = &c->dif.grid;
-    int kq[MAXGRP], kr[MAXGRP];
-    GR.n = 0;
-    GR.ext = 1;
+    CELL.ext = 1;
     for (int col = 0; col < g->n; col++) {
         if (g->ring[col] > RM_CORE_RINGS || c->coltype[col] != COL_FUEL) continue;
-        int q = floordiv2(g->q[col]), rr = floordiv2(g->r[col]);
-        int k;
-        for (k = 0; k < GR.n; k++)
-            if (kq[k] == q && kr[k] == rr) break;
-        if (k == GR.n) {
-            if (GR.n >= MAXGRP) continue;
-            kq[k] = q;
-            kr[k] = rr;
-            GR.nm[k] = 0;
-            /* centre of the full 2x2 rhombus, so the gauges sit on a regular lattice */
-            double aq = 2 * q + 0.5, ar = 2 * rr + 0.5;
-            GR.x[k] = aq + 0.5 * ar;
-            GR.y[k] = sqrt(3.0) / 2 * ar;
-            GR.n++;
+        double x, y, best = 1e9;
+        int kb = -1;
+        rm_hexgrid_xy(g, col, 1.0, &x, &y);
+        for (int k = 0; k < c->nctrl && k < 128; k++) {
+            double rx, ry;
+            rm_hexgrid_xy(g, c->ctrl_col[k], 1.0, &rx, &ry);
+            double d = (x - rx) * (x - rx) + (y - ry) * (y - ry);
+            if (d < best - 1e-9) {
+                best = d;
+                kb = k;
+            }
         }
-        if (GR.nm[k] < 4) GR.ch[k][GR.nm[k]++] = c->chan_of_col[col];
-        double e = fmax(fabs(GR.x[k]), fabs(GR.y[k]));
-        if (e > GR.ext) GR.ext = e;
+        if (kb >= 0 && CELL.n[kb] < 16) CELL.ch[kb][CELL.n[kb]++] = c->chan_of_col[col];
     }
+    for (int k = 0; k < c->nctrl && k < 128; k++) {
+        double rx, ry;
+        rm_hexgrid_xy(g, c->ctrl_col[k], 1.0, &rx, &ry);
+        CELL.ext = fmax(CELL.ext, fmax(fabs(rx), fabs(ry)));
+    }
+    CELL.ready = 1;
 }
 
-static int cm_mode = 1;          /* 1 outlet T, 2 clad T */
-
-static double group_value(int k)
+static double cell_fuel(int k)
 {
-    double v = cm_mode == 2 ? 0 : 0;
-    for (int i = 0; i < GR.nm[k]; i++) {
-        int ch = GR.ch[k][i];
-        if (cm_mode == 2) v = fmax(v, CS.tclad[ch]);
-        else v += CS.tout[ch] / GR.nm[k];
-    }
+    double v = 0;
+    for (int i = 0; i < CELL.n[k]; i++) v = fmax(v, CS.tfuel[CELL.ch[k][i]]);
     return v - 273.15;
 }
 
@@ -304,7 +301,7 @@ static void small_gauge(Vector2 c, float R, double f, int alarm)
     DrawCircleV(c, R, alarm && bl ? (Color){200, 30, 20, 255} : BEZEL);
     DrawCircleV(c, R - 2.5f, FACE);
     const float a0 = 150, a1 = 390;
-    DrawRing(c, R - 6, R - 3, a0 + (a1 - a0) * 0.85f, a1, 8, (Color){210, 40, 30, 255});
+    DrawRing(c, R - 6, R - 3, a0 + (a1 - a0) * 0.8333f, a1, 8, (Color){210, 40, 30, 255});
     for (int i = 0; i <= 6; i++) {
         float a = (a0 + (a1 - a0) * i / 6) * DEG2RAD;
         DrawLineEx((Vector2){c.x + (R - 3) * cosf(a), c.y + (R - 3) * sinf(a)},
@@ -317,31 +314,36 @@ static void small_gauge(Vector2 c, float R, double f, int alarm)
     DrawCircleV(c, 2.2f, (Color){16, 16, 16, 255});
 }
 
+#define FUEL_LO 300.0
+#define FUEL_HI 1500.0
+#define FUEL_ALARM 1300.0
+
 static void draw_coremon(Rectangle r)
 {
     rm_core *c = &P->core;
     steel(r, "CORE MONITORING");
-    if (GR.n == 0) group_channels();
+    if (!CELL.ready) cell_channels();
     Vector2 m = GetMousePosition();
 
-    if (lampbutton((Rectangle){r.x + 12, r.y + 28, 90, 28}, "OUTLET\nTEMP", L_WHT, cm_mode == 1)) cm_mode = 1;
-    if (lampbutton((Rectangle){r.x + 106, r.y + 28, 90, 28}, "CLAD\nTEMP", L_WHT, cm_mode == 2)) cm_mode = 2;
-    dymo(r.x + 206, r.y + 30, "CORE TEMPERATURE MAP - ONE GAUGE PER 2X2 CHANNEL GROUP");
-    text(cm_mode == 2 ? "SCALE 450-700 C (HOTTEST CLAD)" : "SCALE 450-600 C (MIXED OUTLET)", r.x + 206, r.y + 46, 10, INK);
+    dymo(r.x + 12, r.y + 30, "FUEL TEMPERATURE - ONE GAUGE PER CONTROL ROD CELL");
+    text("HOTTEST FUEL CENTRELINE ROUND EACH ROD, 300-1500 C, RED ABOVE 1300",
+         r.x + 12, r.y + 47, 10, INK);
 
     Rectangle mp = {r.x + 12, r.y + 62, 486, 500};
     DrawRectangleRec(mp, (Color){40, 42, 40, 255});
     DrawRectangleLinesEx(mp, 2, BEZEL);
     Vector2 o = {mp.x + mp.width / 2, mp.y + mp.height / 2};
-    float sc = (float)((mp.width / 2 - 26) / GR.ext);
-    float R = sc * 0.98f;
-    double lo = 450, hi = cm_mode == 2 ? 700 : 600;
+    rm_hexgrid *g = &c->dif.grid;
+    float sc = (float)((mp.width / 2 - 8) / (CELL.ext + 0.5 * sqrt(7.0)));
+    float R = (float)(0.5 * sqrt(7.0) * sc * 0.96);
     int hover = -1;
-    for (int k = 0; k < GR.n; k++) {
-        Vector2 p = {o.x + (float)GR.x[k] * sc, o.y + (float)GR.y[k] * sc};
-        double v = group_value(k);
-        double f = (v - lo) / (hi - lo);
-        small_gauge(p, R, f, f > 0.85);
+    for (int k = 0; k < c->nctrl && k < 128; k++) {
+        double x, y;
+        rm_hexgrid_xy(g, c->ctrl_col[k], sc, &x, &y);
+        Vector2 p = {o.x + (float)x, o.y + (float)y};
+        double f = (cell_fuel(k) - FUEL_LO) / (FUEL_HI - FUEL_LO);
+        small_gauge(p, R, f, cell_fuel(k) > FUEL_ALARM);
+        ctext(rod_id[k], p.x, p.y + R * 0.42f, 10, (Color){90, 84, 70, 255});
         if (CheckCollisionPointCircle(m, p, R)) hover = k;
     }
 
@@ -377,11 +379,8 @@ static void draw_coremon(Rectangle r)
 
     if (hover >= 0) {
         char tip[160];
-        int n = snprintf(tip, sizeof tip, "GROUP %d:", hover + 1);
-        for (int i = 0; i < GR.nm[hover] && n < (int)sizeof tip - 40; i++) {
-            int ch = GR.ch[hover][i];
-            n += snprintf(tip + n, sizeof tip - n, "  CH%03d %.0f/%.0fC", ch + 1, CS.tout[ch] - 273.15, CS.tclad[ch] - 273.15);
-        }
+        snprintf(tip, sizeof tip, "ROD %s  GROUP %d  CELL OF %d CHANNELS  FUEL MAX %.0f C  NOTCH %02d", rod_id[hover],
+                 group_of(c->ctrl_bank[hover]), CELL.n[hover], cell_fuel(hover), notch(c->rod_ins[hover]));
         tooltip(tip, r);
     }
 }
@@ -524,6 +523,50 @@ static int mushroom(Vector2 sc, float rad, const char *label)
     return hov && IsMouseButtonPressed(MOUSE_BUTTON_LEFT);
 }
 
+static int drive_all = 0;          /* ROD MOTION switch: 0 selected rod's group, 1 all rods */
+
+/* withdraw (step < 0) or insert a group or every rod; all-or-nothing on the permissives */
+static void drive_rods(double step)
+{
+    rm_core *c = &P->core;
+    int s = P->nms.sel_rod;
+    int move[RM_NBANKS] = {0};
+    if (drive_all) {
+        for (int b = 0; b < RM_NBANKS; b++) move[b] = 1;
+        if (P->auto_rod && !c->scram) move[BANK_REG] = 0;
+    } else {
+        if (s < 0) {
+            logmsg("SELECT A ROD ON THE FULL CORE DISPLAY FIRST");
+            return;
+        }
+        int bk = c->ctrl_bank[s];
+        if (bk == BANK_REG && P->auto_rod && !c->scram) {
+            logmsg("GROUP 6 IS ON AUTO - SELECT MAN FIRST");
+            return;
+        }
+        move[bk] = 1;
+    }
+    char why[80];
+    for (int b = 0; b < RM_NBANKS; b++) {
+        if (!move[b]) continue;
+        /* check against where the group is already heading, so quick clicks can't run ahead */
+        double tgt = 0;
+        int n = 0;
+        for (int k = 0; k < c->nctrl; k++)
+            if (c->ctrl_bank[k] == b) {
+                tgt += c->rod_target[k];
+                n++;
+            }
+        double target = fmin(RM_ACTIVE_H, fmax(0.0, (n ? tgt / n : 0.0) + step));
+        if (!rm_plant_rod_permit(P, b, -1, target, why, sizeof why)) {
+            logmsg("%s", why);
+            return;
+        }
+    }
+    for (int b = 0; b < RM_NBANKS; b++)
+        if (move[b]) rm_core_bank_shift(c, b, step);
+}
+
 static void draw_console(Rectangle r)
 {
     rm_core *c = &P->core;
@@ -555,37 +598,56 @@ static void draw_console(Rectangle r)
     window((Rectangle){r.x + 204, r.y + 74, 222, 38}, "FIRST OUT", P->first_out[0] ? P->first_out : NULL, L_RED,
            P->first_out[0] != 0);
 
-    /* rod banks */
+    /* rod drive: the selected rod's group, or every rod */
     float y = r.y + 122;
     DrawLineEx((Vector2){r.x + 8, y - 4}, (Vector2){r.x + r.width - 8, y - 4}, 1, PAINT_LO);
-    text("BANK      CM IN  BOT TOP   WITHDRAW       INSERT", r.x + 12, y, 10, INK);
-    y += 16;
-    for (int bk = 0; bk < RM_NBANKS; bk++) {
-        double pos = rm_core_bank_pos(c, bk);
-        dymo(r.x + 12, y + 6, bank_name[bk]);
-        readout(r.x + 74, y, 14, 3, "%3.0f", pos);
-        lamp(r.x + 126, y + 12, 5, L_GRN, pos >= RM_ACTIVE_H - 0.5);
-        lamp(r.x + 146, y + 12, 5, L_RED, pos <= 0.5);
-        int blocked = bk == BANK_REG && P->auto_rod && !c->scram;
-        const char *lab[4] = {"OUT 20", "OUT 2", "IN 2", "IN 20"};
-        const double step[4] = {-20, -2, 2, 20};
-        for (int k = 0; k < 4; k++) {
-            Rectangle br = {r.x + 164 + k * 66, y, 62, 26};
-            int pressing = !blocked && input_ok && CheckCollisionPointRec(m, br) && IsMouseButtonDown(MOUSE_BUTTON_LEFT);
-            if (lampbutton(br, lab[k], L_WHT, pressing) && !blocked) {
-                char why[80];
-                double target = fmin(RM_ACTIVE_H, fmax(0.0, pos + step[k]));
-                if (!rm_plant_rod_permit(P, bk, -1, target, why, sizeof why)) logmsg("%s", why);
-                else rm_core_bank_shift(c, bk, step[k]);
-            }
-        }
-        y += 30;
+    dymo(r.x + 22, y + 2, "ROD MOTION");
+    static const char *mot[2] = {"GROUP", "ALL"};
+    int pk = rotary((Vector2){r.x + 62, y + 70}, 20, 2, mot, drive_all, -150, -30, 40);
+    if (pk >= 0 && pk != drive_all) {
+        drive_all = pk;
+        logmsg("ROD MOTION: %s", drive_all ? "ALL RODS" : "SELECTED ROD'S GROUP");
     }
+    int s = P->nms.sel_rod, bk = s >= 0 ? c->ctrl_bank[s] : -1;
+    float x = r.x + 140;
+    dymo(x, y + 2, drive_all ? "DRIVING" : "SELECTED GROUP");
+    if (drive_all) {
+        readout(x, y + 18, 22, 2, "%d", c->nctrl);
+        text("RODS - ALL GROUPS", x, y + 54, 10, INK);
+    } else if (bk >= 0) {
+        readout(x, y + 18, 22, 1, "%d", group_of(bk));
+        text(bank_name[bk], x, y + 54, 10, INK);
+    } else {
+        readout(x, y + 18, 22, 1, "-");
+        text("SELECT A ROD", x, y + 54, 10, INK);
+    }
+    double pos = 0;
+    if (drive_all) {
+        for (int k = 0; k < c->nctrl; k++) pos += c->rod_ins[k] / c->nctrl;
+    } else if (bk >= 0) pos = rm_core_bank_pos(c, bk);
+    dymo(x + 110, y + 2, drive_all ? "AVG NOTCH" : "NOTCH");
+    if (drive_all || bk >= 0) readout(x + 110, y + 18, 22, 2, "%02d", notch(pos));
+    else readout(x + 110, y + 18, 22, 2, "--");
+    lamp(x + 186, y + 26, 5, L_GRN, (drive_all || bk >= 0) && pos >= RM_ACTIVE_H - 0.5);
+    text("FULL IN", x + 196, y + 21, 10, INK);
+    lamp(x + 186, y + 46, 5, L_RED, (drive_all || bk >= 0) && pos <= 0.5);
+    text("FULL OUT", x + 196, y + 41, 10, INK);
+
+    const char *lab[4] = {"WITHDRAW\n5 NOTCH", "WITHDRAW\n1 NOTCH", "INSERT\n1 NOTCH", "INSERT\n5 NOTCH"};
+    const double step[4] = {-5 * NOTCH_CM, -NOTCH_CM, NOTCH_CM, 5 * NOTCH_CM};
+    for (int k = 0; k < 4; k++) {
+        Rectangle br = {r.x + 12 + k * 106, y + 100, 100, 36};
+        int pressing = input_ok && CheckCollisionPointRec(m, br) && IsMouseButtonDown(MOUSE_BUTTON_LEFT);
+        if (lampbutton(br, lab[k], L_WHT, pressing)) drive_rods(step[k]);
+    }
+    text("GROUP DRIVES THE GROUP OF THE ROD SELECTED ON THE", r.x + 12, y + 144, 10, INK);
+    text("FULL CORE DISPLAY.  GROUP 1 SAFETY, 2-5 SHIMS, 6 REGULATING.", r.x + 12, y + 156, 10, INK);
+    text("BELOW 20% THE RWM WANTS GROUP 1 OUT FIRST, THEN 2-5 TOGETHER.", r.x + 12, y + 168, 10, INK);
 
     /* regulating bank auto control */
     y = r.y + 326;
     DrawLineEx((Vector2){r.x + 8, y - 4}, (Vector2){r.x + r.width - 8, y - 4}, 1, PAINT_LO);
-    dymo(r.x + 12, y, "REG BANK");
+    dymo(r.x + 12, y, "AUTO - GROUP 6");
     if (lampbutton((Rectangle){r.x + 12, y + 16, 60, 34}, "AUTO", L_WHT, P->auto_rod) && !P->auto_rod) {
         P->auto_rod = 1;
         logmsg("AUTOMATIC ROD CONTROL ON");
@@ -606,11 +668,11 @@ static void draw_console(Rectangle r)
     double reg = rm_core_bank_pos(c, BANK_REG);
     struct { const char *l; int on; Color c; } st[6] = {
         {"WITHDRAWAL BLOCK", rm_plant_rod_block(P, 0, NULL, 0), L_AMB},
-        {"REG AT LIMIT", reg < 0.5 || reg > RM_ACTIVE_H - 0.5, L_AMB},
+        {"GROUP 6 AT LIMIT", reg < 0.5 || reg > RM_ACTIVE_H - 0.5, L_AMB},
         {"AUTO IN CONTROL", P->auto_rod && !c->scram, L_WHT},
         {"RODS MOVING", 0, L_WHT},
         {"SCRAM BKRS OPEN", c->scram, L_RED},
-        {"SAFETY BANK OUT", rm_core_bank_pos(c, BANK_SAFETY) < 0.5, L_RED},
+        {"GROUP 1 OUT", rm_core_bank_pos(c, BANK_SAFETY) < 0.5, L_RED},
     };
     for (int i = 0; i < c->nctrl; i++)
         if (fabs(c->rod_vel[i]) > 0) st[3].on = 1;
