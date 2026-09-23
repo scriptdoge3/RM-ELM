@@ -145,7 +145,12 @@ static void draw(rm_plant *p, const char *cmd)
            100 * p->bypass_valve, p->W_relief > 0 ? "OPEN" : "shut", p->p_cond / 1e3, C(p->T_fw));
     printf(" GENERATOR " BRIGHT "%6.1f MWe" AMBER " gross   HOUSE LOAD %5.1f MW   NET " BRIGHT "%6.1f MWe" AMBER "   BREAKER %s\033[K\n",
            p->P_gen / 1e6, p->P_house / 1e6, p->P_net / 1e6, p->generator_breaker ? "CLOSED" : "OPEN");
-    printf("\033[K\n");
+    printf(" GRID %s  DIESELS", p->offsite_power ? "ON " : BRIGHT INV "LOST" RST AMBER);
+    for (int i = 0; i < 3; i++)
+        printf(" %d:%s", i + 1, !p->diesel_avail[i] ? "FAIL" : (p->diesel_running[i] ? "RUN " : "stby"));
+    printf("   DRACS %s dampers %3.0f/%3.0f/%3.0f %%  %5.1f MW  %5.0f kg/s\033[K\n",
+           p->dracs_auto ? "AUTO" : "MAN ", 100 * p->dracs_damper[0], 100 * p->dracs_damper[1],
+           100 * p->dracs_damper[2], p->Q_dracs / 1e6, p->W_dracs);
     printf(" POWER TREND (%d s)  ", ntrend);
     static const char *blk[] = {" ", "\xe2\x96\x81", "\xe2\x96\x82", "\xe2\x96\x83", "\xe2\x96\x84",
                                 "\xe2\x96\x85", "\xe2\x96\x86", "\xe2\x96\x87", "\xe2\x96\x88"};
@@ -168,7 +173,8 @@ static void help(rm_plant *p)
     rm_core *c = &p->core;
     logmsg(c, "ROD <REG|A|B|C|D|SAFE|ALL> <cm>  0=out 160=in    SCRAM   RESET");
     logmsg(c, "PUMP <P1-P4|S1-S4> <START|STOP|PONY|SPEED n>     TURB <TRIP|RESET>");
-    logmsg(c, "AUTO <%%|OFF>  PSET <MPa>  FW <AUTO|MAN>  RPS <ON|BYPASS>  RUN <1-8>  QUIT");
+    logmsg(c, "AUTO <%%|OFF>  PSET <MPa>  FW <AUTO|MAN>  DRACS <OPEN|CLOSE|AUTO>");
+    logmsg(c, "FAIL|FIX <GRID|DG n|Pn|Sn>   RPS <ON|BYPASS>   RUN <1-8>   QUIT");
 }
 
 static void command(rm_plant *p, char *line, int *quit)
@@ -245,6 +251,26 @@ static void command(rm_plant *p, char *line, int *quit)
             p->power_set = v / 100.0;
             logmsg(c, "AUTO ROD CONTROL: REG BANK HOLDS %.0f %% POWER", v);
         }
+    } else if ((!strcmp(a, "FAIL") || !strcmp(a, "FIX")) && n >= 2) {
+        int fail = !strcmp(a, "FAIL");
+        if (!strcmp(b, "GRID")) {
+            p->offsite_power = !fail;
+            logmsg(c, fail ? "*** LOSS OF OFFSITE POWER ***" : "OFFSITE POWER RESTORED");
+        } else if (!strcmp(b, "DG") && n >= 3 && atoi(d) >= 1 && atoi(d) <= 3) {
+            p->diesel_avail[atoi(d) - 1] = !fail;
+            logmsg(c, "DIESEL %d %s", atoi(d), fail ? "FAILED" : "REPAIRED");
+        } else if ((b[0] == 'P' || b[0] == 'S') && atoi(b + 1) >= 1 && atoi(b + 1) <= RM_NLOOPS) {
+            rm_pump *pp = b[0] == 'P' ? &p->loop[atoi(b + 1) - 1].ppump : &p->loop[atoi(b + 1) - 1].spump;
+            pp->tripped = fail;
+            logmsg(c, "PUMP %s %s", b, fail ? "*** TRIPPED (FAULT) ***" : "FAULT CLEARED - USE START");
+        } else logmsg(c, "FAIL|FIX GRID | DG <1-3> | P1-P4 | S1-S4");
+    } else if (!strcmp(a, "DRACS") && n >= 2) {
+        if (!strcmp(b, "AUTO")) p->dracs_auto = 1;
+        else {
+            p->dracs_auto = 0;
+            for (int i = 0; i < 3; i++) p->dracs_damper_set[i] = !strcmp(b, "OPEN") ? 1.0 : 0.0;
+        }
+        logmsg(c, "DRACS DAMPERS %s", b);
     } else if (!strcmp(a, "RPS") && n >= 2) {
         p->rps_bypass = !strcmp(b, "BYPASS");
         logmsg(c, p->rps_bypass ? "*** RPS BYPASSED - TRIPS DISABLED ***" : "RPS ARMED");

@@ -106,6 +106,23 @@ typedef struct {
     int auto_rod;             /* regulating bank holds reactor power at power_set */
     double power_set;         /* fraction of rated */
 
+    /* electrical */
+    int offsite_power;        /* grid connection available */
+    int diesel_avail[3];      /* diesel generator not failed */
+    int diesel_running[3];
+    double diesel_timer;      /* s since loss of offsite power */
+    double fw_pump;           /* feedwater pump speed 0..1 (motor driven) */
+    double cw_pump;           /* circulating water pump speed 0..1 */
+
+    /* decay heat removal: three natural-draft sodium-to-air coolers */
+    int dracs_auto;           /* dampers open automatically on reactor trip */
+    double dracs_damper[3];   /* 0..1 */
+    double dracs_damper_set[3];
+    double Q_dracs;           /* W removed */
+    double W_dracs;           /* in-vessel natural circulation through the DRACS coolers, kg/s */
+    double h_dracs_out;       /* sodium enthalpy returning from the coolers to the inlet plenum */
+    double T_air;             /* K */
+
     /* reactor protection system */
     int rps_bypass;           /* 1 = trips disabled (for training/accident scenarios) */
     char first_out[48];       /* first trip signal to actuate */
@@ -117,6 +134,7 @@ typedef struct {
 
 /* Nominal values used by displays and protection. */
 double rm_plant_nominal_flow(void);   /* total primary, kg/s */
+int rm_plant_essential_power(const rm_plant *p);
 
 int rm_plant_init(rm_plant *p);
 void rm_plant_free(rm_plant *p);

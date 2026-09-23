@@ -90,6 +90,32 @@ int main(void)
     CHECK(p->core.scram, "protection tripped the reactor");
     CHECK(peak_clad < 973.15, "clad stayed below 700 C (%.0f C)", peak_clad - 273.15);
     rm_plant_free(p);
+
+    for (int sbo = 0; sbo < 2; sbo++) {
+        printf("\n%s:\n", sbo ? "station blackout (grid lost, all 3 diesels fail)"
+                                 : "loss of offsite power (diesels start, pony motors, DRACS)");
+        rm_plant_init(p);
+        rm_plant_steady(p);
+        p->offsite_power = 0;
+        if (sbo) for (int i = 0; i < 3; i++) p->diesel_avail[i] = 0;
+        peak_clad = 0;
+        double peak_out = 0;
+        for (int i = 0; i <= 900; i++) {
+            if (i % 150 == 0) {
+                show(p);
+                printf("          DRACS %.1f MW  decay %.1f MW  pony %s\n", p->Q_dracs / 1e6, p->core.p_decay / 1e6,
+                       rm_plant_essential_power(p) ? "powered" : "DEAD");
+            }
+            rm_plant_step(p, i < 200 ? 0.05 : 1.0);
+            if (rm_core_max_clad_T(&p->core) > peak_clad) peak_clad = rm_core_max_clad_T(&p->core);
+            if (p->T_core_out > peak_out) peak_out = p->T_core_out;
+        }
+        printf("  first out: %s, peak clad %.0f C, peak core outlet %.0f C\n", p->first_out, peak_clad - 273.15,
+               peak_out - 273.15);
+        CHECK(p->core.scram, "tripped");
+        CHECK(peak_clad < 1073.15, "clad below 800 C (%.0f C)", peak_clad - 273.15);
+        rm_plant_free(p);
+    }
     free(p);
     (void)fresh;
     return TEST_REPORT();

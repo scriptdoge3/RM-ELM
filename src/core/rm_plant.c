@@ -204,14 +204,14 @@ static double sg_step(rm_sg *s, double Wna, double hna_in, double p, double hfw,
 }
 
 /* ---- pumps -------------------------------------------------------------- */
-static void pump_step(rm_pump *p, double dt)
+static void pump_step(rm_pump *p, double dt, int main_power, int ess_power)
 {
-    if (p->motor_on && !p->tripped) {
+    if (p->motor_on && !p->tripped && main_power) {
         p->speed += (p->speed_set - p->speed) * dt / 5.0;
     } else {
         /* flywheel coastdown: half speed after ~12 s */
         p->speed -= p->speed * p->speed / 12.0 * dt;
-        if (p->pony_on && p->speed < 0.10) p->speed = 0.10;
+        if (p->pony_on && ess_power && p->speed < 0.10) p->speed = 0.10;
     }
     if (p->speed < 0) p->speed = 0;
 }
@@ -264,6 +264,12 @@ int rm_plant_init(rm_plant *p)
     p->auto_fw = p->auto_turbine = 1;
     p->auto_rod = 1;
     p->power_set = 1.0;
+    p->offsite_power = 1;
+    for (int i = 0; i < 3; i++) p->diesel_avail[i] = 1;
+    p->fw_pump = 1.0;
+    p->cw_pump = 1.0;
+    p->dracs_auto = 1;
+    p->T_air = 293.15;
     p->p_set = P_STEAM0;
     p->T_steam_set = T_STEAM0;
     p->T_cw_in = 293.15;
@@ -284,8 +290,9 @@ static void hydraulics(rm_plant *p, double dt)
     double K_loop = DP_LOOP0 / (W_P0 * W_P0);
     double rho_cold = rm_na_rho(fmax(rm_na_T(p->h_inplenum), RM_NA_TMELT));
     double rho_hot = rm_na_rho(fmax(rm_na_T(p->h_outplenum), RM_NA_TMELT));
+    double rho_dr = rm_na_rho(fmax(rm_na_T(p->h_dracs_out > 0 ? p->h_dracs_out : p->h_outplenum), RM_NA_TMELT));
     for (int s = 0; s < nsub; s++) {
-        double Wc = 0;
+        double Wc = p->W_dracs;
         for (int i = 0; i < RM_NLOOPS; i++) Wc += p->loop[i].W;
         /* laminar floor keeps natural circulation from being over-resisted at low flow */
         double dpc = K_core * Wc * fabs(Wc) + 0.004 * DP_CORE0 * Wc / (W_P0 * RM_NLOOPS);
@@ -296,8 +303,15 @@ static void hydraulics(rm_plant *p, double dt)
             l->W += h * dp / LOOP_INERTIA;
             if (l->W < 0 && !l->check_valve_stuck_open) l->W = 0.0;
         }
+        /* DRACS path: cold column from the coolers (6 m above the core
+         * centre) down to the inlet plenum; a fluidic diode stops reverse
+         * (core-bypass) flow while the pumps run */
+        double head = G * 6.0 * (rho_dr - rho_hot);
+        double dpd = head - 0.02 * p->W_dracs * fabs(p->W_dracs) - dpc;
+        p->W_dracs += h * dpd / 80.0;
+        if (p->W_dracs < 0) p->W_dracs = 0;
     }
-    p->W_core = 0;
+    p->W_core = p->W_dracs;
     for (int i = 0; i < RM_NLOOPS; i++) p->W_core += p->loop[i].W;
 }
 
@@ -312,6 +326,8 @@ static void steam_side(rm_plant *p, double dt)
     double ratio = p->p_header / P_STEAM0;
     double valve = p->turbine_tripped ? 0.0 : p->turbine_valve;
     p->W_turbine = W_T0 / 0.9 * valve * ratio;
+    /* no condenser vacuum without circulating water: bypass interlocked shut */
+    if (p->cw_pump < 0.5) p->bypass_valve = 0.0;
     p->W_bypass = 0.4 * W_T0 * p->bypass_valve * ratio;
     /* SG safety valves: full-flow capacity, lifting at 16 MPa */
     p->W_relief = p->p_header > 16.0e6 ? 1.1 * W_T0 * fmin(1.0, (p->p_header - 16.0e6) / 0.3e6) : 0.0;
@@ -337,7 +353,8 @@ static void steam_side(rm_plant *p, double dt)
     p->P_house = 25.0e6 + pumps;
     p->P_net = p->P_gen - p->P_house;
     double Qc = (p->W_turbine + p->W_bypass) * (p->h_header - 150.0e3) - p->P_mech;
-    double Tcw_out = p->T_cw_in + fmax(Qc, 0.0) / (W_CW * 4180.0);
+    double Tcw_out = p->T_cw_in + fmax(Qc, 0.0) / (W_CW * 4180.0 * fmax(p->cw_pump, 0.02));
+    if (Tcw_out > 373.0) Tcw_out = 373.0;
     p->p_cond = rm_if97_psat(Tcw_out + 5.0);
     double load = fmin(1.0, p->W_turbine / W_T0);
     p->T_fw += ((423.15 + 90.0 * load) - p->T_fw) * dt / 30.0;
@@ -366,8 +383,18 @@ static void steam_side(rm_plant *p, double dt)
             if (s->fw_valve < 0.02) s->fw_valve = 0.02;
             if (s->fw_valve > 1.3) s->fw_valve = 1.3;
         }
-        s->W_fw = s->isolated ? 0.0 : s->fw_valve / 0.8 * W_T0 / RM_NLOOPS;
+        s->W_fw = s->isolated ? 0.0 : s->fw_valve / 0.8 * W_T0 / RM_NLOOPS * p->fw_pump;
     }
+}
+
+static double dracs_capacity(const rm_plant *p, double T_na)
+{
+    double dT = T_na - p->T_air;
+    if (dT < 0) dT = 0;
+    double Q = 0;
+    /* 23 MW per train with 520 K between sodium and air, damper fully open */
+    for (int i = 0; i < 3; i++) Q += 23.0e6 * pow(dT / 520.0, 1.3) * p->dracs_damper[i];
+    return Q;
 }
 
 static void plant_thermal(rm_plant *p, double dt, int with_neutronics)
@@ -414,11 +441,76 @@ static void plant_thermal(rm_plant *p, double dt, int with_neutronics)
                                  rm_if97_h_pT(15.5e6, p->T_fw), dt);
         pipe_step(&l->scold, l->Ws, hsg_out, dt);
     }
+    /* DRACS stream: takes outlet-plenum sodium, gives up Q, returns to the inlet plenum */
+    double Tq = rm_na_T(p->h_outplenum);
+    double Q = dracs_capacity(p, Tq);
+    double hmin = rm_na_h(p->T_air + 30.0);
+    double qmax = p->W_dracs * (p->h_outplenum - hmin);
+    if (Q > qmax) Q = qmax > 0 ? qmax : 0;
+    p->Q_dracs = Q;
+    /* the column inside the coolers: even stagnant sodium there is chilled
+     * through an open damper, which is what starts the flow */
+    double Weff = p->W_dracs > 60.0 ? p->W_dracs : 60.0;
+    double Qc = dracs_capacity(p, Tq);
+    double qcmax = Weff * (p->h_outplenum - hmin);
+    if (Qc > qcmax) Qc = qcmax > 0 ? qcmax : 0;
+    p->h_dracs_out = p->h_outplenum - Qc / Weff;
+    double h_ret = p->W_dracs > 1e-6 ? p->h_outplenum - Q / p->W_dracs : p->h_outplenum;
+    hcold_mix += p->W_dracs * h_ret;
+    wsum += p->W_dracs;
+    /* heat leaking through the idle coolers still comes off the plenum */
+    if (p->W_dracs < 1e-6) {
+        double qidle = 0.02 * dracs_capacity(p, Tq);
+        double Mo = p->m_outplenum + 150000.0 * 500.0 / na_cp_h(p->h_outplenum);
+        p->h_outplenum -= qidle * dt / Mo;
+    }
     double Mi = p->m_inplenum + 60000.0 * 500.0 / na_cp_h(p->h_inplenum);
     if (wsum > 1e-9) p->h_inplenum = (Mi / dt * p->h_inplenum + wsum * hcold_mix / wsum) / (Mi / dt + wsum);
 }
 
 double rm_plant_nominal_flow(void) { return W_P0 * RM_NLOOPS; }
+
+int rm_plant_essential_power(const rm_plant *p)
+{
+    if (p->offsite_power) return 1;
+    for (int i = 0; i < 3; i++)
+        if (p->diesel_running[i]) return 1;
+    return 0;
+}
+
+static void electrical(rm_plant *p, double dt)
+{
+    if (p->offsite_power) {
+        p->diesel_timer = 0;
+        for (int i = 0; i < 3; i++) p->diesel_running[i] = 0;
+    } else {
+        p->diesel_timer += dt;
+        /* start on undervoltage, up to speed and loaded after 10 s */
+        for (int i = 0; i < 3; i++)
+            p->diesel_running[i] = p->diesel_avail[i] && p->diesel_timer > 10.0;
+        /* the main generator can't hold the grid on its own here */
+        p->turbine_tripped = 1;
+        p->generator_breaker = 0;
+    }
+    /* feedwater and circulating water pumps are on the main buses */
+    double fw_target = p->offsite_power ? 1.0 : 0.0;
+    p->fw_pump += (fw_target - p->fw_pump) * fmin(1.0, dt / (fw_target > p->fw_pump ? 10.0 : 4.0));
+    p->cw_pump += ((p->offsite_power ? 1.0 : 0.0) - p->cw_pump) * fmin(1.0, dt / 20.0);
+}
+
+/* sodium-to-air decay heat removal. Hot sodium from the outlet plenum passes
+ * down through the DRACS heat exchangers and returns, colder and denser,
+ * to the core inlet plenum: that cold column is what drives in-vessel
+ * natural circulation when the pumps are off. Natural draft on the air
+ * side, so it works without power. */
+static void dracs_dampers(rm_plant *p, double dt)
+{
+    rm_core *c = &p->core;
+    for (int i = 0; i < 3; i++) {
+        if (p->dracs_auto && c->scram) p->dracs_damper_set[i] = 1.0;
+        p->dracs_damper[i] += (p->dracs_damper_set[i] - p->dracs_damper[i]) * fmin(1.0, dt / 20.0);
+    }
+}
 
 static void trip(rm_plant *p, const char *why)
 {
@@ -443,7 +535,8 @@ static void protection(rm_plant *p)
     for (int i = 0; i < RM_NLOOPS; i++)
         if (p->loop[i].ppump.tripped || !p->loop[i].ppump.motor_on) pumps_off++;
     if (p->rps_bypass || c->scram) return;
-    if (pw > 1.15) trip(p, "HIGH POWER 115%");
+    if (!p->offsite_power && pw > 0.05) trip(p, "LOSS OF OFFSITE POWER");
+    else if (pw > 1.15) trip(p, "HIGH POWER 115%");
     else if (p->period > 0 && p->period < 10.0 && c->pks.n > 1e-4) trip(p, "SHORT PERIOD 10 S");
     else if (pw > 0.15 && pw / fmax(flow, 0.01) > 1.15) trip(p, "POWER/FLOW 1.15");
     else if (pw > 0.10 && flow < 0.70) trip(p, "LOW PRIMARY FLOW 70%");
@@ -458,8 +551,9 @@ void rm_plant_step(rm_plant *p, double dt)
 {
     for (int i = 0; i < RM_NLOOPS; i++) {
         rm_loop *l = &p->loop[i];
-        pump_step(&l->ppump, dt);
-        pump_step(&l->spump, dt);
+        int ess = rm_plant_essential_power(p);
+        pump_step(&l->ppump, dt, p->offsite_power, ess);
+        pump_step(&l->spump, dt, p->offsite_power, ess);
         l->Ws = W_S0 * fmax(l->spump.speed, 0.02);
     }
     /* automatic rod control: regulating bank drives against the power
@@ -472,6 +566,8 @@ void rm_plant_step(rm_plant *p, double dt)
         else if (err < -0.005) rm_core_bank_move(c, BANK_REG, pos - 2.0);
         else rm_core_bank_move(c, BANK_REG, pos);
     }
+    electrical(p, dt);
+    dracs_dampers(p, dt);
     hydraulics(p, dt);
     plant_thermal(p, dt, 1);
     steam_side(p, dt);

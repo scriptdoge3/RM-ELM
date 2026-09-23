@@ -47,6 +47,8 @@ the steam plant and turbine-generator, a power trend and the message log.
 | `TURB TRIP\|RESET` | trip the turbine / reset and resynchronise |
 | `PSET <MPa>` | steam pressure setpoint (turbine valve holds it) |
 | `FW AUTO\|MAN` | feedwater control (auto holds 480 C steam) |
+| `DRACS OPEN\|CLOSE\|AUTO` | decay heat removal coolers (auto opens on a reactor trip) |
+| `FAIL\|FIX GRID`, `DG <1-3>`, `P1..P4`, `S1..S4` | inject or clear failures: grid loss, diesel generators, pumps |
 | `RPS ON\|BYPASS` | arm or bypass the reactor protection system |
 | `RUN <1-8>` | simulation speed |
 | `HELP`, `QUIT` | |
@@ -63,4 +65,8 @@ Things to try:
 - `TURB TRIP` at full power and watch the bypass and safety valves.
 - `RPS BYPASS`, then stop all four pumps: the unprotected loss-of-flow
   accident. This core is not passively safe - watch the clad temperature.
+- `FAIL GRID`: loss of offsite power. The reactor trips, diesels start after
+  10 s, pony motors keep 10% flow, DRACS takes over decay heat.
+- `FAIL DG 1`, `FAIL DG 2`, `FAIL DG 3`, then `FAIL GRID`: station blackout.
+  Only passive natural circulation through DRACS is left - and it's enough.
 - After a SCRAM, `RESET` and restart the reactor by pulling the shim banks.
