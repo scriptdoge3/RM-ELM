@@ -46,18 +46,19 @@ Lamps follow the US convention of the period: red = running/closed,
 green = stopped/open. The SIM RATE buttons set speed (X1 to X16), HOLD
 pauses, and F12 saves a screenshot.
 
-![Rod select board: rod 28 pulled out on its own](docs/gui_rods.png)
+![Full core display and rod select matrix: rod 16-19 withdrawn on its own](docs/gui_rods.png)
 
-The ROD SELECT button (or TAB) swaps the plant mimic for the rod select
-board. It is a core map of all 55 control rods, each with a round position
-dial: the needle at 12 o'clock means fully out, and it turns clockwise as
-the rod goes in. The ring colour shows the rod's bank. Behind the dials,
-every fuel channel is a lamp lit by its power (dark = low, amber = rated,
-red = high), so you can see the power tilt when you move one rod. Click a
-dial to select that rod, then drive it alone with OUT/IN. Hover over a dial
-to see its number, bank and depth. The bank buttons on the console move a
-whole bank and keep each rod's offset. REG bank rods can only be moved by
-hand after you select MAN.
+The ROD SELECT button (or TAB) swaps the plant mimic for a BWR-style full
+core display. The upper board shows a 2-digit red LED readout for each of
+the 55 rods, laid out in the shape of the core on a ruled grid. Each rod is
+named by its grid coordinates (for example 16-19). Readouts show notch
+position: 00 = fully in, 40 = fully out, 4 cm per notch. The desk below it
+has the rod select matrix, with one black pushbutton per rod in the same
+pattern. Press a button (or click a readout) to select that rod; its button
+lights white. Then use WITHDRAW/INSERT 1 or 5 notches to drive that rod
+alone. Hover over a rod to see its bank and depth. The bank buttons on the
+console move a whole bank and keep each rod's offset. REG bank rods can only
+be moved by hand after you select MAN.
 
 The first `cmake` configure downloads raylib 5.5 automatically (or uses one
 already installed). On Linux you need the X11/OpenGL development packages:
