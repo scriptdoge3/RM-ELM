@@ -127,8 +127,10 @@ static void draw(rm_plant *p, const char *cmd)
            c->p_fission / 1e6, c->p_decay / 1e6, 1e5 * c->rho, c->rho / beta);
     if (isfinite(p->period) && fabs(p->period) < 1e4) printf("PERIOD %+7.1f s\033[K\n", p->period);
     else printf("PERIOD   INFIN\033[K\n");
-    printf("   FIRST OUT: %-28s DOPPLER %5.2f pcm/K  PEAKING %4.2f\033[K\n",
-           p->first_out[0] ? p->first_out : "-", 1e5 * c->rho_doppler_coef, c->peak_factor);
+    static const char *mode_name[4] = {"SHUTDOWN", "REFUEL", "STARTUP", "RUN"};
+    printf("   FIRST OUT: %-28s MODE %-8s  SRM %8.0f cps  IRM R%-2d %5.1f  APRM %5.1f %%\033[K\n",
+           p->first_out[0] ? p->first_out : "-", mode_name[p->mode], rm_plant_srm_cps(p), p->irm_range,
+           rm_plant_irm(p), rm_plant_aprm(p));
     printf("   AUTO ROD %s %3.0f%%  RODS cm in:", p->auto_rod ? "ON " : "off", 100 * p->power_set);
     for (int b = 0; b < RM_NBANKS; b++) printf(" %s %5.1f", bank_name[b], rm_core_bank_pos(c, b));
     printf("\033[K\n");
@@ -184,7 +186,7 @@ static void help(rm_plant *p)
     logmsg(c, "ROD <REG|A|B|C|D|SAFE|ALL> <cm>  0=out 160=in    SCRAM   RESET");
     logmsg(c, "PUMP <P1-P4|S1-S4> <START|STOP|PONY|SPEED n>     TURB <TRIP|RESET>");
     logmsg(c, "AUTO <%%|OFF>  PSET <MPa>  FW <START|STOP|AUTO|MAN>  SG <1-4> ISOLATE");
-    logmsg(c, "DRACS <OPEN|CLOSE|AUTO>   RPS <ON|BYPASS>   QUIT");
+    logmsg(c, "MODE <SD|REFUEL|STARTUP|RUN>  IRM <1-10>  DRACS <OPEN|CLOSE|AUTO>  RPS <ON|BYPASS>  QUIT");
 }
 
 static void command(rm_plant *p, char *line, int *quit)
@@ -208,8 +210,28 @@ static void command(rm_plant *p, char *line, int *quit)
             last_first_out[0] = 0;
             logmsg(c, "RPS RESET - RODS REMAIN INSERTED");
         }
+    } else if (!strcmp(a, "MODE") && n >= 2) {
+        int md = !strncmp(b, "SD", 2) || !strncmp(b, "SHUT", 4) ? RM_MODE_SHUTDOWN
+               : !strncmp(b, "REF", 3) ? RM_MODE_REFUEL : !strncmp(b, "START", 5) ? RM_MODE_STARTUP
+               : !strcmp(b, "RUN") ? RM_MODE_RUN : -1;
+        char why[80];
+        if (md < 0) logmsg(c, "MODE SD|REFUEL|STARTUP|RUN");
+        else if (!rm_plant_set_mode(p, md, why, sizeof why)) logmsg(c, "%s", why);
+    } else if (!strcmp(a, "IRM") && n >= 2) {
+        int rg = atoi(b);
+        if (rg < 1 || rg > 10) { logmsg(c, "IRM <1-10>"); return; }
+        p->irm_range = rg;
+        logmsg(c, "IRM RANGE %d", rg);
     } else if (!strcmp(a, "ROD") && n == 3) {
-        if (c->scram) { logmsg(c, "ROD WITHDRAWAL BLOCKED: RPS TRIPPED"); return; }
+        char why[80];
+        int withdrawing = 0;
+        {
+            double tgt = atof(d);
+            int bk0 = !strcmp(b, "ALL") ? -1 : bank_of(b);
+            for (int k = 0; k < RM_NBANKS; k++)
+                if ((bk0 < 0 || k == bk0) && tgt < rm_core_bank_pos(c, k) - 0.01) withdrawing = 1;
+        }
+        if (withdrawing && rm_plant_rod_block(p, 0, why, sizeof why)) { logmsg(c, "%s", why); return; }
         if (p->auto_rod && !strcmp(b, "REG")) { logmsg(c, "REG BANK IS IN AUTO - USE AUTO OFF FIRST"); return; }
         double pos = atof(d);
         if (!strcmp(b, "ALL")) {
@@ -319,7 +341,7 @@ int main(int argc, char **argv)
     unsigned seen = p->nmsg;
     if (hot) {
         logmsg(c, "UNIT IN HOT SHUTDOWN: ALL RODS IN, SODIUM AT 380 C");
-        logmsg(c, "ROD SAFE 0, THEN SHIMS OUT TO CRITICAL. FW START AT A FEW %%, TURB RESET > 8%%");
+        logmsg(c, "MODE STARTUP, ROD SAFE 0, SHIMS OUT TO CRITICAL, IRM RANGE UP, RUN AT 5-15%%");
     } else {
         logmsg(c, "UNIT AT RATED POWER, TURBINE ON LINE - FOLLOW THE LOAD DISPATCHER");
     }

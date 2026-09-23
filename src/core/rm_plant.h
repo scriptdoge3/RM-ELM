@@ -136,6 +136,10 @@ typedef struct {
 
     int containment_isolated; /* penetrations shut, incl. the sodium purification (cold trap) lines */
 
+    /* reactor mode switch and neutron monitoring */
+    int mode;                 /* RM_MODE_* */
+    int irm_range;            /* intermediate range monitor range switch, 1..10 */
+
     /* reactor protection system */
     int rps_bypass;           /* 1 = trips disabled (for training/accident scenarios) */
     char first_out[48];       /* first trip signal to actuate */
@@ -166,6 +170,21 @@ void rm_plant_hot_standby(rm_plant *p);
 void rm_plant_isolate_sg(rm_plant *p, int loop);
 /* Post an operator message. */
 void rm_plant_msg(rm_plant *p, const char *fmt, ...);
+/* Reactor mode switch (BWR style). SHUTDOWN scrams and blocks withdrawal,
+ * REFUEL allows single-rod moves only, STARTUP arms the APRM setdown (15%)
+ * and IRM high trips, RUN restores the full-power trips and needs >5% APRM. */
+enum { RM_MODE_SHUTDOWN, RM_MODE_REFUEL, RM_MODE_STARTUP, RM_MODE_RUN };
+/* returns 0 and an explanation in why[] if the switch is refused */
+int rm_plant_set_mode(rm_plant *p, int mode, char *why, int nwhy);
+double rm_plant_srm_cps(const rm_plant *p);      /* source range monitor, counts/s */
+double rm_plant_irm(const rm_plant *p);          /* IRM reading on its range, 0..125 scale */
+double rm_plant_aprm(const rm_plant *p);         /* average power range monitor, % */
+/* Rod withdrawal block: returns 1 and the reason if withdrawal is blocked.
+ * single = 1 when one rod is being moved from the rod select matrix. */
+int rm_plant_rod_block(const rm_plant *p, int single, char *why, int nwhy);
+#define RM_IRM_TRIP 120.0
+#define RM_IRM_DOWNSCALE 5.0
+
 /* Thresholds shown on the panels */
 #define RM_H2_ALARM 0.30      /* ppm, hydrogen-in-sodium high */
 #define RM_H2_BACKGROUND 0.08

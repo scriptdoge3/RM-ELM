@@ -67,21 +67,26 @@ The top row is the reactor:
   for each of the 55 rods (00 = fully in, 40 = fully out, 4 cm per notch;
   rods are named by grid coordinates such as 16-19). The rod select matrix
   below it has one pushbutton per rod: select one, then WITHDRAW/INSERT it.
-- **Core monitoring**:
-  - An analog lamp map of all 342 fuel channels: each channel is an
-    incandescent lamp that glows from a dull ember to yellow-white as its
-    value rises, and switches to a flashing red lens past the alarm point.
-    It is switchable between channel power, outlet temperature (450-600 C),
-    cladding temperature (450-700 C) and sodium boiling margin. Control rod
-    positions are black blanking plugs.
-  - The axial power, clad and sodium profile of the hot channel, or of any
-    channel you click.
-  - Nuclear instruments: source range (cps), intermediate range (log amps),
-    startup rate (decades/min), four power-range quadrant channels N41-N44
-    and the quadrant tilt ratio.
-  - Core figures: peaking factors FQ/FR/FZ, axial offset, xenon and
-    samarium worth, the U-233 and Pa-233 inventory bred from the thorium,
-    boiling margin and the Doppler coefficient.
+- **Core monitoring** (BWR-style neutron monitoring):
+  - **Reactor mode switch**: SHUTDOWN / REFUEL / STARTUP / RUN, a rotary
+    knob. SHUTDOWN scrams and blocks rod withdrawal. REFUEL allows only
+    single-rod moves from the rod select matrix. STARTUP arms the APRM
+    setdown trip (15%) and the IRM high trip. RUN restores the 115% trip and
+    is refused below 5% APRM, so you switch to RUN between 5 and 15%.
+  - **Source range monitor**: counts per second on a log meter (about
+    100 cps at hot shutdown).
+  - **Intermediate range monitor**: a 0-125 meter with a 10-position range
+    switch, each range half a decade. Keep it on scale while power rises:
+    above 120 it trips the reactor (STARTUP/REFUEL), above 108 it blocks
+    withdrawal, and below 5 (ranges 2-10) it blocks withdrawal until you
+    range down. The SRM and IRM detectors are retracted in RUN.
+  - **APRM** meter (red zone from the active trip setpoint) and **thermal
+    power in MWth**.
+  - **Core temperature lamp map**: every fuel channel is an incandescent
+    lamp glowing from ember to yellow-white with its outlet temperature
+    (450-600 C) or cladding temperature (450-700 C), with a flashing red
+    lens past the alarm point. Hover over a channel to read it.
+  - Status lamps for SRM/IRM/APRM alarms and the rod block reason.
 - **Reactor control console**:
   - Mushroom-head manual scram, trip reset, RPS armed/bypass, first-out window.
   - Rod bank buttons with bottom/top lamps.
@@ -122,20 +127,24 @@ green = stopped/open.
 ![Hot shutdown: all rods in, sodium at 380 C](docs/gui_hot.png)
 
 All 55 rods are in, the reactor is deeply subcritical (about -14,700 pcm),
-the sodium is isothermal at 380 C with the pumps running, and feedwater is
-off.
+the sodium is isothermal at 380 C with the pumps running, feedwater is off
+and the mode switch is in SHUTDOWN.
 
-1. Withdraw the SAFETY bank fully (OUT 20 until the TOP lamp).
-2. Withdraw the shim banks in steps while you watch the period and log power.
-   The core goes critical with the shims at about 72 cm. A period shorter
-   than 10 s trips the reactor.
-3. Set the demand to a few percent and select AUTO. Automatic rod control
+1. Turn the mode switch to STARTUP.
+2. Withdraw the SAFETY bank fully (OUT 20 until the TOP lamp).
+3. Withdraw the shim banks in steps, watching the SRM count rate and the
+   period. The core goes critical with the shims at about 72 cm. A period
+   shorter than 10 s trips the reactor.
+4. As power rises, turn the IRM range switch up to keep the needle between
+   about 15 and 100 (it trips above 120).
+5. Set the demand to a few percent and select AUTO. Automatic rod control
    limits the startup rate to a period of about 60 s or longer.
-4. At a few percent, START the feedwater. Feed holds each loop's cold leg at
-   380 C at any power.
-5. Above 8% power, with steam above 10 MPa, LATCH the turbine. The
+6. Start the feedwater. Raise power to about 10% APRM and turn the mode
+   switch to RUN, which is refused below 5% and must happen before the 15%
+   setdown trip.
+7. Above 8% power, with steam above 10 MPa, LATCH the turbine. The
    dispatcher takes over and the unit is on line.
-6. Raise the demand. When the REG BANK AT LIMIT annunciator lights, pull the
+8. Raise the demand. When the REG BANK AT LIMIT annunciator lights, pull the
    shims a little to give the regulating bank room.
 
 ### Steam generator leaks
@@ -199,11 +208,15 @@ The screen shows:
 | `TURB TRIP\|RESET` | trip the turbine / latch and synchronise (above 8% power, steam above 10 MPa) |
 | `PSET <MPa>` | steam pressure setpoint (turbine valve holds it) |
 | `DRACS OPEN\|CLOSE\|AUTO` | decay heat removal coolers (auto opens on a reactor trip) |
+| `MODE SD\|REFUEL\|STARTUP\|RUN` | reactor mode switch |
+| `IRM <1-10>` | IRM range switch |
 | `RPS ON\|BYPASS` | arm or bypass the reactor protection system |
 | `HELP`, `QUIT` | |
 
 Automatic reactor trips:
-- power 115%, period 10 s, power/flow 1.15;
+- power 115% (in RUN), APRM setdown 15% and IRM high (in STARTUP/REFUEL),
+  mode switch to SHUTDOWN;
+- period 10 s, power/flow 1.15;
 - primary flow below 70%, two primary pumps off;
 - core outlet 600 C, clad 700 C;
 - steam pressure 16.5 MPa;

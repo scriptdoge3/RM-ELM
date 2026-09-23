@@ -232,8 +232,17 @@ static float meter_ang(double v, double lo, double hi)
     return (float)(-145.0 + 110.0 * f);
 }
 
+static void meterl(Rectangle r, const char *label, double v, double lo, double hi, double red_lo, double red_hi,
+                   int nmaj, const char *const *labs);
+
 static void meter(Rectangle r, const char *label, double v, double lo, double hi, double red_lo, double red_hi,
                   int nmaj)
+{
+    meterl(r, label, v, lo, hi, red_lo, red_hi, nmaj, NULL);
+}
+
+static void meterl(Rectangle r, const char *label, double v, double lo, double hi, double red_lo, double red_hi,
+                   int nmaj, const char *const *labs)
 {
     DrawRectangleRec(r, BEZEL);
     Rectangle f = {r.x + 5, r.y + 5, r.width - 10, r.height - 10};
@@ -252,7 +261,8 @@ static void meter(Rectangle r, const char *label, double v, double lo, double hi
         DrawLineEx(p0, p1, i % 5 ? 1.0f : 1.6f, INK);
         if (i % 5 == 0) {
             char b[16];
-            snprintf(b, sizeof b, "%g", lo + (hi - lo) * i / nmin);
+            if (labs) snprintf(b, sizeof b, "%s", labs[i / 5]);
+            else snprintf(b, sizeof b, "%g", lo + (hi - lo) * i / nmin);
             Vector2 pt = {c.x + (R - 18) * cosf(a), c.y + (R - 18) * sinf(a)};
             ctext(b, pt.x, pt.y - 4, 10, INK);
         }
@@ -448,14 +458,16 @@ static void number_rods(void)
 #define NOTCH_CM 4.0
 static int notch(double ins) { return (int)lround((RM_ACTIVE_H - ins) / NOTCH_CM); }
 
-static int rod_blocked(int k, int log)
+/* withdraw = 1 for outward motion; insertion is never blocked except by auto */
+static int rod_blocked(int k, int log, int withdraw)
 {
     rm_core *c = &P->core;
-    if (c->scram) {
-        if (log) logmsg("ROD MOTION BLOCKED: REACTOR TRIPPED");
+    char why[80];
+    if (withdraw && rm_plant_rod_block(P, 1, why, sizeof why)) {
+        if (log) logmsg("%s", why);
         return 1;
     }
-    if (c->ctrl_bank[k] == BANK_REG && P->auto_rod) {
+    if (c->ctrl_bank[k] == BANK_REG && P->auto_rod && !c->scram) {
         if (log) logmsg("ROD %s IS IN REG BANK - SELECT MAN FIRST", rod_id[k]);
         return 1;
     }
@@ -545,7 +557,7 @@ static void draw_rodselect(Rectangle r)
     for (int k = 0; k < 4; k++) {
         Rectangle br = {x + (k % 2) * 106, d.y + 54 + (k / 2) * 36, 100, 32};
         int pressing = s >= 0 && CheckCollisionPointRec(m, br) && IsMouseButtonDown(MOUSE_BUTTON_LEFT);
-        if (lampbutton(br, lab[k], L_WHT, pressing) && s >= 0 && !rod_blocked(s, 1)) {
+        if (lampbutton(br, lab[k], L_WHT, pressing) && s >= 0 && !rod_blocked(s, 1, dn[k] > 0)) {
             int nt = notch(c->rod_target[s]) + dn[k];
             if (nt < 0) nt = 0;
             if (nt > (int)(RM_ACTIVE_H / NOTCH_CM)) nt = (int)(RM_ACTIVE_H / NOTCH_CM);
@@ -568,8 +580,7 @@ static void draw_rodselect(Rectangle r)
 }
 
 /* ---- core monitoring ------------------------------------------------------------ */
-static int cm_mode = 0;          /* map: 0 channel power, 1 outlet T, 2 clad T, 3 boiling margin */
-static int cm_sel = -1;          /* selected fuel channel, -1 = hot channel */
+static int cm_mode = 1;          /* map: 1 outlet T, 2 clad T (0 power / 3 margin kept for the statistics) */
 
 static struct {
     double pch[1024], tout[1024], tclad[1024], tfuel[1024], margin[1024];
@@ -697,10 +708,31 @@ static double cm_value(int ch, double *lo, double *hi)
     }
 }
 
-static void cell2(float x, float y, const char *lab, int ndig, const char *val)
+/* rotary selector: positions spread over an arc, click a legend to turn it */
+static int rotary(Vector2 c, float rad, int n, const char *const *leg, int cur, float a0, float a1, float lr)
 {
-    dymo(x, y, lab);
-    readout(x, y + 15, 15, ndig, "%s", val);
+    Vector2 m = GetMousePosition();
+    int pick = -1;
+    for (int i = 0; i < n; i++) {
+        float a = (a0 + (a1 - a0) * i / (n - 1)) * DEG2RAD;
+        Vector2 t = {c.x + lr * cosf(a), c.y + lr * sinf(a)};
+        DrawLineEx((Vector2){c.x + (rad + 2) * cosf(a), c.y + (rad + 2) * sinf(a)},
+                   (Vector2){c.x + (rad + 7) * cosf(a), c.y + (rad + 7) * sinf(a)}, 2, INK);
+        int tw = MeasureText(leg[i], 10);
+        Rectangle hit = {t.x - tw / 2.0f - 4, t.y - 8, tw + 8.0f, 16};
+        int hv = CheckCollisionPointRec(m, hit);
+        if (hv) DrawRectangleRec(hit, alpha(WHITE, 60));
+        ctext(leg[i], t.x, t.y - 5, 10, i == cur ? (Color){150, 20, 10, 255} : INK);
+        if (hv && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) pick = i;
+    }
+    /* knob: black bakelite with a white pointer */
+    DrawCircleV((Vector2){c.x + 2, c.y + 3}, rad, alpha(BLACK, 90));
+    DrawCircleV(c, rad, (Color){24, 24, 22, 255});
+    DrawRing(c, rad - 3, rad, 0, 360, 36, (Color){70, 70, 66, 255});
+    float a = (a0 + (a1 - a0) * cur / (n - 1)) * DEG2RAD;
+    DrawLineEx((Vector2){c.x - (rad - 6) * cosf(a) * 0.4f, c.y - (rad - 6) * sinf(a) * 0.4f},
+               (Vector2){c.x + (rad - 4) * cosf(a), c.y + (rad - 4) * sinf(a)}, 5, (Color){236, 234, 224, 255});
+    return pick;
 }
 
 static void draw_coremon(Rectangle r)
@@ -710,12 +742,12 @@ static void draw_coremon(Rectangle r)
     steel(r, "CORE MONITORING");
     core_statistics();
     Vector2 m = GetMousePosition();
+    int blink = ((int)(GetTime() * 3)) & 1;
 
-    const char *modes[4] = {"CHANNEL\nPOWER", "OUTLET\nTEMP", "CLAD\nTEMP", "BOILING\nMARGIN"};
-    for (int i = 0; i < 4; i++)
-        if (lampbutton((Rectangle){r.x + 12 + i * 76, r.y + 28, 72, 30}, modes[i], L_WHT, cm_mode == i)) cm_mode = i;
-
-    /* core map */
+    /* ---- temperature lamp map ---- */
+    if (lampbutton((Rectangle){r.x + 12, r.y + 28, 100, 30}, "OUTLET\nTEMP", L_WHT, cm_mode == 1)) cm_mode = 1;
+    if (lampbutton((Rectangle){r.x + 116, r.y + 28, 100, 30}, "CLAD\nTEMP", L_WHT, cm_mode == 2)) cm_mode = 2;
+    dymo(r.x + 226, r.y + 36, "CORE TEMP MAP");
     Rectangle mp = {r.x + 12, r.y + 64, 300, 300};
     DrawRectangleRec(mp, (Color){40, 42, 40, 255});
     DrawRectangleLinesEx(mp, 2, BEZEL);
@@ -723,15 +755,12 @@ static void draw_coremon(Rectangle r)
     const float sc = 0.78f;
     float hr = RM_PITCH * sc / sqrtf(3.0f);
     int hover = -1;
-    int sel = cm_sel >= 0 ? cm_sel : CS.hot;
-    int blink = ((int)(GetTime() * 3)) & 1;
     for (int col = 0; col < g->n; col++) {
         if (g->ring[col] > RM_CORE_RINGS) continue;
         double x, y;
         rm_hexgrid_xy(g, col, RM_PITCH * sc, &x, &y);
         Vector2 p = {o.x + (float)x, o.y + (float)y};
         if (c->coltype[col] == COL_CTRL) {
-            /* control rod thimble: black blanking plug */
             DrawCircleV(p, hr - 0.6f, (Color){10, 10, 10, 255});
             DrawCircleLinesV(p, hr * 0.5f, (Color){70, 70, 66, 255});
             continue;
@@ -739,120 +768,89 @@ static void draw_coremon(Rectangle r)
         int ch = c->chan_of_col[col];
         double lo, hi, v = cm_value(ch, &lo, &hi);
         map_lamp(p, hr - 0.6f, (v - lo) / (hi - lo), blink);
-        if (ch == sel) DrawCircleLinesV(p, hr + 0.6f, WHITE);
-        if (CheckCollisionPointCircle(m, p, hr * 0.9f)) {
-            hover = ch;
-            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) cm_sel = cm_sel == ch ? -1 : ch;
-        }
+        if (CheckCollisionPointCircle(m, p, hr * 0.9f)) hover = ch;
     }
-    /* reference lamps: what each glow means in the selected mode */
     Rectangle sb = {mp.x, mp.y + mp.height + 4, mp.width, 26};
     DrawRectangleRec(sb, (Color){40, 42, 40, 255});
     DrawRectangleLinesEx(sb, 1, BEZEL);
-    static const char *ref[4][6] = {
-        {"0", "0.4", "0.8", "1.2", "1.6", "1.9X"},
+    static const char *ref[2][6] = {
         {"450", "478", "505", "533", "560", "588C"},
         {"450", "496", "542", "588", "634", "680C"},
-        {"600", "480", "360", "240", "120", "50K"},
     };
     for (int i = 0; i < 6; i++) {
         float lx = sb.x + 14 + i * 48;
         map_lamp((Vector2){lx, sb.y + 13}, 7, i < 5 ? i / 5.0 * 0.92 : 0.95, blink);
-        text(ref[cm_mode][i], lx + 11, sb.y + 8, 10, (Color){220, 216, 200, 255});
+        text(ref[cm_mode == 2][i], lx + 11, sb.y + 8, 10, (Color){220, 216, 200, 255});
     }
 
-
-    /* axial profile of the selected channel: power bars, clad and sodium lines */
-    Rectangle ap = {mp.x, sb.y + 40, mp.width, r.y + r.height - sb.y - 50};
-    textf(ap.x, ap.y - 13, 10, INK, "CH %03d %s  AXIAL: POWER", sel + 1, cm_sel >= 0 ? "(SELECTED)" : "(HOT - CLICK MAP)");
-    text("CLAD", ap.x + 238, ap.y - 13, 10, PEN_RED);
-    text("NA", ap.x + 270, ap.y - 13, 10, (Color){60, 90, 200, 255});
-    DrawRectangleRec(ap, FACE);
-    DrawRectangleLinesEx(ap, 1, BEZEL);
-    double qmax = 1;
-    for (int k = 0; k < RM_NZ_ACT; k++) qmax = fmax(qmax, c->th.q_node[core_fnode(c, sel, k)]);
-    float bw = (ap.width - 8) / RM_NZ_ACT;
-    Vector2 lc = {0}, ln = {0};
-    for (int k = 0; k < RM_NZ_ACT; k++) {
-        int fn = core_fnode(c, sel, k);
-        float bx = ap.x + 4 + k * bw, h = (float)((ap.height - 8) * c->th.q_node[fn] / qmax);
-        DrawRectangleRec((Rectangle){bx + 1, ap.y + ap.height - 4 - h, bw - 2, h}, (Color){236, 168, 50, 255});
-        float yc = ap.y + ap.height - 4 - (ap.height - 8) * (float)fmin(fmax((c->th.T[TH_CL][fn] - 573.15) / 400.0, 0), 1);
-        float yn = ap.y + ap.height - 4 - (ap.height - 8) * (float)fmin(fmax((c->th.T[TH_C][fn] - 573.15) / 400.0, 0), 1);
-        Vector2 pc = {bx + bw / 2, yc}, pn = {bx + bw / 2, yn};
-        if (k) {
-            DrawLineEx(lc, pc, 2, PEN_RED);
-            DrawLineEx(ln, pn, 2, (Color){60, 90, 200, 255});
-        }
-        lc = pc;
-        ln = pn;
+    /* ---- reactor mode switch ---- */
+    float by = r.y + 400;
+    plate(r.x + 12, by, "REACTOR MODE SWITCH", 10);
+    static const char *modes[4] = {"SHUTDOWN", "REFUEL", "STARTUP", "RUN"};
+    int pk = rotary((Vector2){r.x + 92, by + 84}, 22, 4, modes, P->mode, -180, 0, 58);
+    if (pk >= 0 && pk != P->mode) {
+        char why[80];
+        if (!rm_plant_set_mode(P, pk, why, sizeof why)) logmsg("%s", why);
     }
-    text("BOTTOM", ap.x + 4, ap.y + 3, 10, INK);
-    text("TOP", ap.x + ap.width - 24, ap.y + 3, 10, INK);
-    text("300-700 C", ap.x + 110, ap.y + 3, 10, INK);
 
-    /* instruments */
-    float x = r.x + 324, y = r.y + 64, dx = 128;
-    char v[24];
-    double n = c->pks.n;
-    double cps = n * 1e12;
-    if (cps < 1e5) snprintf(v, sizeof v, "%5.0f", cps);
-    else snprintf(v, sizeof v, "-----");
-    cell2(x, y, "SOURCE RNG CPS", 5, v);
-    snprintf(v, sizeof v, "%5.1f", log10(fmax(n * 1e-3, 1e-13)));
-    cell2(x + dx, y, "INTERM RNG LOG A", 5, v);
-    y += 40;
-    double sur = isfinite(P->period) && fabs(P->period) > 0.5 ? 26.06 / P->period : 0.0;
-    snprintf(v, sizeof v, "%5.2f", fmax(fmin(sur, 9.99), -9.99));
-    cell2(x, y, "STARTUP RATE DPM", 5, v);
-    snprintf(v, sizeof v, "%5.3f", CS.qptr);
-    cell2(x + dx, y, "QUAD TILT RATIO", 5, v);
-    y += 40;
-    const char *nq[4] = {"PR N41  PCT", "PR N42  PCT", "PR N43  PCT", "PR N44  PCT"};
-    for (int i = 0; i < 4; i++) {
-        snprintf(v, sizeof v, "%5.1f", CS.quad[i]);
-        cell2(x + (i % 2) * dx, y + (i / 2) * 40, nq[i], 5, v);
+    /* ---- thermal power ---- */
+    dymo(r.x + 176, by + 4, "THERMAL POWER MWTH");
+    readout(r.x + 176, by + 20, 30, 4, "%4.0f", c->p_thermal / 1e6);
+    dymo(r.x + 176, by + 66, "APRM PCT");
+    readout(r.x + 176, by + 82, 18, 4, "%5.1f", rm_plant_aprm(P));
+    dymo(r.x + 250, by + 66, "SRM PERIOD S");
+    if (isfinite(P->period) && fabs(P->period) < 999) readout(r.x + 250, by + 82, 18, 4, "%5.0f", P->period);
+    else readout(r.x + 250, by + 82, 18, 4, "----");
+
+    /* ---- source range monitor ---- */
+    float x = r.x + 324, w = r.width - 336;
+    static const char *srml[8] = {".1", "", "10", "", "1E3", "", "1E5", ""};
+    double cps = rm_plant_srm_cps(P);
+    meterl((Rectangle){x, r.y + 28, w, 112}, P->mode == RM_MODE_RUN ? "SRM CPS - RETRACTED" : "SRM  CPS",
+           log10(fmax(cps, 0.1)), -1, 6, 5, 6, 7, srml);
+
+    /* ---- intermediate range monitor with its range switch ---- */
+    double irm = rm_plant_irm(P);
+    meter((Rectangle){x, r.y + 146, w - 110, 112}, P->mode == RM_MODE_RUN ? "IRM - RETRACTED" : "IRM", irm, 0, 125,
+          RM_IRM_TRIP, 125, 5);
+    static const char *rng[10] = {"1", "2", "3", "4", "5", "6", "7", "8", "9", "10"};
+    float kx = x + w - 52, ky = r.y + 214;
+    ctext("IRM RANGE", kx, r.y + 150, 10, INK);
+    int rk = rotary((Vector2){kx, ky}, 18, 10, rng, P->irm_range - 1, -225, 45, 34);
+    if (rk >= 0 && rk + 1 != P->irm_range) {
+        P->irm_range = rk + 1;
+        logmsg("IRM RANGE %d", P->irm_range);
     }
-    y += 80;
-    snprintf(v, sizeof v, "%5.2f", CS.fq);
-    cell2(x, y, "PEAKING FQ", 5, v);
-    snprintf(v, sizeof v, "%5.2f", CS.fr);
-    cell2(x + dx, y, "RADIAL FR", 5, v);
-    y += 40;
-    snprintf(v, sizeof v, "%5.2f", CS.fz);
-    cell2(x, y, "AXIAL FZ", 5, v);
-    snprintf(v, sizeof v, "%5.1f", CS.ao);
-    cell2(x + dx, y, "AXIAL OFFSET PCT", 5, v);
-    y += 40;
-    snprintf(v, sizeof v, "%5.0f", CS.xe_pcm);
-    cell2(x, y, "XENON PCM", 5, v);
-    snprintf(v, sizeof v, "%5.0f", CS.sm_pcm);
-    cell2(x + dx, y, "SAMARIUM PCM", 5, v);
-    y += 40;
-    snprintf(v, sizeof v, "%5.2f", CS.u233_kg);
-    cell2(x, y, "U-233 KG", 5, v);
-    snprintf(v, sizeof v, "%5.2f", CS.pa233_kg);
-    cell2(x + dx, y, "PA-233 KG", 5, v);
-    y += 40;
-    snprintf(v, sizeof v, "%5.0f", CS.margin_min);
-    cell2(x, y, "BOIL MARGIN K", 5, v);
-    snprintf(v, sizeof v, "%5.2f", 1e5 * c->rho_doppler_coef);
-    cell2(x + dx, y, "DOPPLER PCM/K", 5, v);
-    y += 40;
-    snprintf(v, sizeof v, "%5.2f", CS.pch[sel] / 1e6);
-    cell2(x, y, "CHANNEL MW", 5, v);
-    snprintf(v, sizeof v, "%5.0f", CS.tout[sel] - 273.15);
-    cell2(x + dx, y, "CHANNEL OUT C", 5, v);
-    y += 40;
-    snprintf(v, sizeof v, "%5.0f", CS.tclad[sel] - 273.15);
-    cell2(x, y, "CHANNEL CLAD C", 5, v);
-    snprintf(v, sizeof v, "%5.0f", CS.tfuel[sel] - 273.15);
-    cell2(x + dx, y, "CHANNEL FUEL C", 5, v);
+
+    /* ---- average power range monitor ---- */
+    double trip = P->mode == RM_MODE_RUN ? 115.0 : 15.0;
+    meter((Rectangle){x, r.y + 264, w, 112}, P->mode == RM_MODE_RUN ? "APRM PCT" : "APRM PCT - SETDOWN",
+          rm_plant_aprm(P), 0, 125, trip, 125, 5);
+
+    /* ---- monitor status lamps ---- */
+    float ly = r.y + 390;
+    struct { const char *l; int on; Color c; } st[8] = {
+        {"SRM HIGH", cps > 1e5, L_AMB},
+        {"IRM DOWNSCALE", P->mode != RM_MODE_RUN && P->irm_range > 1 && irm < RM_IRM_DOWNSCALE, L_AMB},
+        {"IRM UPSCALE", irm > 108.0 && P->mode != RM_MODE_RUN, L_AMB},
+        {"IRM HIGH TRIP", irm > RM_IRM_TRIP && P->mode != RM_MODE_RUN, L_RED},
+        {"APRM DOWNSCALE", rm_plant_aprm(P) < 5.0, L_AMB},
+        {"APRM SETDOWN", P->mode != RM_MODE_RUN, L_WHT},
+        {"APRM HIGH", rm_plant_aprm(P) > trip, L_RED},
+        {"ROD BLOCK", rm_plant_rod_block(P, 0, NULL, 0), L_AMB},
+    };
+    for (int i = 0; i < 8; i++) {
+        float lx = x + 8 + (i % 2) * (w / 2), yy = ly + (i / 2) * 22 + 8;
+        lamp(lx, yy, 5, st[i].c, st[i].on);
+        text(st[i].l, lx + 10, yy - 5, 10, INK);
+    }
+    char why[80];
+    if (rm_plant_rod_block(P, 0, why, sizeof why)) text(why + 11, x + 8, ly + 94, 10, (Color){140, 30, 20, 255});
 
     if (hover >= 0) {
         char tip[96];
-        snprintf(tip, sizeof tip, "CH %03d  %.2f MW  OUT %.0f C  CLAD %.0f C  FUEL %.0f C", hover + 1,
-                 CS.pch[hover] / 1e6, CS.tout[hover] - 273.15, CS.tclad[hover] - 273.15, CS.tfuel[hover] - 273.15);
+        snprintf(tip, sizeof tip, "CH %03d  OUTLET %.0f C  CLAD %.0f C  FUEL %.0f C  %.2f MW", hover + 1,
+                 CS.tout[hover] - 273.15, CS.tclad[hover] - 273.15, CS.tfuel[hover] - 273.15, CS.pch[hover] / 1e6);
         float tw = (float)MeasureText(tip, 10) + 10;
         float tx = fminf(m.x + 12, r.x + r.width - tw - 6), ty = m.y - 22;
         DrawRectangleRec((Rectangle){tx, ty, tw, 16}, (Color){244, 238, 214, 255});
@@ -1247,13 +1245,17 @@ static void draw_controls(Rectangle r)
         readout(r.x + 76, y + 2, 16, 3, "%3.0f", pos);
         lamp(r.x + 134, y + 14, 5, L_GRN, pos >= RM_ACTIVE_H - 0.5);
         lamp(r.x + 156, y + 14, 5, L_RED, pos <= 0.5);
-        int blocked = c->scram || (bk == BANK_REG && P->auto_rod);
+        int blocked = bk == BANK_REG && P->auto_rod && !c->scram;
         const char *lab[4] = {"OUT\n20", "OUT\n2", "IN\n2", "IN\n20"};
         const double step[4] = {-20, -2, 2, 20};
         for (int k = 0; k < 4; k++) {
             Rectangle br = {r.x + 176 + k * 53, y, 48, 28};
             int pressing = !blocked && CheckCollisionPointRec(m, br) && IsMouseButtonDown(MOUSE_BUTTON_LEFT);
-            if (lampbutton(br, lab[k], L_WHT, pressing) && !blocked) rm_core_bank_shift(c, bk, step[k]);
+            if (lampbutton(br, lab[k], L_WHT, pressing) && !blocked) {
+                char why[80];
+                if (step[k] < 0 && rm_plant_rod_block(P, 0, why, sizeof why)) logmsg("%s", why);
+                else if (!(c->scram && step[k] < 0)) rm_core_bank_shift(c, bk, step[k]);
+            }
         }
         y += 34;
     }
@@ -1279,7 +1281,7 @@ static void draw_controls(Rectangle r)
     dymo(r.x + 12, y, "ROD CONTROL STATUS");
     double reg = rm_core_bank_pos(c, BANK_REG);
     struct { const char *l; int on; Color c; } st[6] = {
-        {"WITHDRAWAL BLOCK", c->scram || (isfinite(P->period) && P->period > 0 && P->period < 20), L_AMB},
+        {"WITHDRAWAL BLOCK", rm_plant_rod_block(P, 0, NULL, 0), L_AMB},
         {"REG AT LIMIT", reg < 0.5 || reg > RM_ACTIVE_H - 0.5, L_AMB},
         {"AUTO IN CONTROL", P->auto_rod && !c->scram, L_WHT},
         {"RODS MOVING", 0, L_WHT},
@@ -1319,7 +1321,7 @@ static void draw_annunciators(Rectangle r)
         {"CORE FLOW", "LOW", P->W_core < 0.9 * rm_plant_nominal_flow(), 0, L_AMB},
         {"SODIUM PUMP", "OFF", pumps_off > 0, 0, L_AMB},
         {"CORE OUTLET", "TEMP HIGH", P->T_core_out > 833.15, 0, L_AMB},
-        {"QUADRANT", "TILT HIGH", CS.qptr > 1.02 && c->p_thermal > 0.2 * RM_P_RATED, 0, L_AMB},
+        {"ROD", "WITHDRAWAL BLOCK", rm_plant_rod_block(P, 0, NULL, 0), 0, L_AMB},
         {"BOILING", "MARGIN LOW", CS.margin_min < 200, 1, L_RED},
         {"REG BANK", "AT LIMIT", P->auto_rod && !c->scram && (reg < 0.5 || reg > RM_ACTIVE_H - 0.5), 0, L_AMB},
         {"TURBINE", "TRIP", P->turbine_tripped, 0, L_AMB},
@@ -1421,10 +1423,10 @@ static int start_menu(void)
         "PENALTIES FOR TRIPS. EQUIPMENT CAN FAIL AT ANY TIME - WATCH THE",
         "ANNUNCIATORS, THE ALARM TYPER AND THE HYDROGEN METERS.",
         "",
-        "HOT SHUTDOWN START: WITHDRAW SAFETY BANK, THEN SHIMS UNTIL THE PERIOD",
-        "GOES POSITIVE. SELECT AUTO WITH A LOW DEMAND, START FEEDWATER AT A FEW",
-        "PERCENT, LATCH THE TURBINE ABOVE 8%, THEN RAISE POWER. PULL SHIMS WHEN",
-        "THE REG BANK REACHES ITS LIMIT.",
+        "HOT SHUTDOWN START: MODE SWITCH TO STARTUP, WITHDRAW SAFETY BANK, THEN",
+        "SHIMS UNTIL THE PERIOD GOES POSITIVE. RANGE THE IRM UP AS POWER RISES",
+        "(IT TRIPS ABOVE 120). START FEEDWATER, GO TO RUN BETWEEN 5 AND 15%",
+        "APRM, LATCH THE TURBINE, THEN RAISE POWER.",
     };
     for (int i = 0; i < 9; i++) text(brief[i], x, y + i * 16, 10, INK);
     y += 170;
@@ -1514,7 +1516,7 @@ int main(void)
             msg_seen = P->nmsg;
             if (start_hot) {
                 logmsg("Unit in hot shutdown: all rods in, sodium at 380 C");
-                logmsg("Withdraw SAFETY bank, then shims to criticality");
+                logmsg("Mode switch to STARTUP, then withdraw SAFETY bank and shims");
             } else {
                 logmsg("Unit at rated power, turbine on line");
                 logmsg("Follow the load dispatcher's orders");

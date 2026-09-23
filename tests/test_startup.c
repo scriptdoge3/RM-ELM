@@ -17,6 +17,13 @@ static void show(const rm_plant *p, const char *what)
            p->p_header / 1e6, p->P_net / 1e6);
 }
 
+/* the operator keeps the IRM on scale, ranging up and down */
+static void irm_ranging(rm_plant *p)
+{
+    while (p->irm_range < 10 && rm_plant_irm(p) > 90.0) p->irm_range++;
+    while (p->irm_range > 1 && rm_plant_irm(p) < 15.0) p->irm_range--;
+}
+
 static void run(rm_plant *p, double secs, double dt, const char *what, double every)
 {
     double next = p->t;
@@ -26,6 +33,7 @@ static void run(rm_plant *p, double secs, double dt, const char *what, double ev
             show(p, what);
             next += every;
         }
+        irm_ranging(p);
         rm_plant_step(p, dt);
     }
 }
@@ -43,6 +51,13 @@ int main(void)
     CHECK(n0 > 1e-12 && n0 < 1e-7, "source-range level %g", n0);
     CHECK(fabs(p->T_core_in - 653.15) < 2, "isothermal 380 C (%.1f)", p->T_core_in - 273.15);
 
+    char why[80];
+    CHECK(p->mode == RM_MODE_SHUTDOWN, "starts with the mode switch in SHUTDOWN");
+    CHECK(rm_plant_rod_block(p, 0, why, sizeof why), "rod withdrawal blocked in SHUTDOWN");
+    CHECK(!rm_plant_set_mode(p, RM_MODE_RUN, why, sizeof why), "RUN refused at source level (%s)", why);
+    rm_plant_set_mode(p, RM_MODE_STARTUP, why, sizeof why);
+    CHECK(!c->scram, "STARTUP selected without a trip");
+    printf("  SRM %.0f cps, IRM range %d reads %.2f\n", rm_plant_srm_cps(p), p->irm_range, rm_plant_irm(p));
     printf("withdraw safety bank, then shims in steps until critical:\n");
     rm_core_bank_move(c, BANK_SAFETY, 0.0);
     run(p, 90, 0.1, "safety out", 30);
@@ -67,11 +82,12 @@ int main(void)
     CHECK(c->p_thermal > 0.01 * RM_P_RATED && c->p_thermal < 0.06 * RM_P_RATED, "holding ~3%% (%.1f MW)",
           c->p_thermal / 1e6);
 
-    printf("feedwater in service, raise to 15%%, latch turbine:\n");
+    printf("feedwater in service, raise to 10%%, mode switch to RUN, latch turbine:\n");
     p->fw_on = 1;
-    p->power_set = 0.15;
+    p->power_set = 0.10;
     run(p, 900, 0.2, "feed on, to 15%", 100);
     CHECK(!c->scram, "no trip with feed on (%s)", p->first_out);
+    CHECK(rm_plant_set_mode(p, RM_MODE_RUN, why, sizeof why), "RUN accepted at %.1f%% APRM", rm_plant_aprm(p));
     p->turbine_tripped = 0;
     p->generator_breaker = 1;
     p->tv_int = -2.0;

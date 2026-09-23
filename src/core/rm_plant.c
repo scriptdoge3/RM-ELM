@@ -297,6 +297,8 @@ int rm_plant_init(rm_plant *p)
     p->T_fw = T_FW0;
     p->p_cond = 6.0e3;
     p->period = INFINITY;
+    p->mode = RM_MODE_RUN;
+    p->irm_range = 10;
     return 0;
 }
 
@@ -567,6 +569,52 @@ void rm_plant_isolate_sg(rm_plant *p, int i)
 
 static void trip(rm_plant *p, const char *why);
 
+/* ---- neutron monitoring ---------------------------------------------------- */
+/* SRM: fission chambers seeing ~100 cps at the hot-shutdown source level.
+ * SRM and IRM detectors are driven out of the core in RUN, where they read
+ * only the low flux at the bottom of their travel. */
+double rm_plant_srm_cps(const rm_plant *p)
+{
+    return (p->mode == RM_MODE_RUN ? 3.0e2 : 3.0e11) * p->core.pks.n;
+}
+
+/* IRM ranges are half a decade apart; range 10 reads full scale (125) at 40% */
+static double irm_full(int range) { return 0.40 / pow(10.0, (10 - range) / 2.0); }
+double rm_plant_irm(const rm_plant *p)
+{
+    return 125.0 * p->core.pks.n / irm_full(p->irm_range) * (p->mode == RM_MODE_RUN ? 1e-6 : 1.0);
+}
+
+double rm_plant_aprm(const rm_plant *p) { return 100.0 * p->core.pks.n; }
+
+int rm_plant_set_mode(rm_plant *p, int mode, char *why, int nwhy)
+{
+    static const char *name[4] = {"SHUTDOWN", "REFUEL", "STARTUP", "RUN"};
+    if (mode == p->mode) return 1;
+    if (mode == RM_MODE_RUN && rm_plant_aprm(p) < 5.0) {
+        snprintf(why, nwhy, "RUN REFUSED: APRM DOWNSCALE (BELOW 5%%)");
+        return 0;
+    }
+    p->mode = mode;
+    rm_plant_msg(p, "REACTOR MODE SWITCH IN %s", name[mode]);
+    if (mode == RM_MODE_SHUTDOWN) trip(p, "MODE SWITCH IN SHUTDOWN");
+    if (why && nwhy) why[0] = 0;
+    return 1;
+}
+
+int rm_plant_rod_block(const rm_plant *p, int single, char *why, int nwhy)
+{
+    const char *r = NULL;
+    if (p->core.scram) r = "ROD BLOCK: REACTOR TRIPPED";
+    else if (p->mode == RM_MODE_SHUTDOWN) r = "ROD BLOCK: MODE SWITCH IN SHUTDOWN";
+    else if (p->mode == RM_MODE_REFUEL && !single) r = "ROD BLOCK: REFUEL MODE - ONE ROD AT A TIME";
+    else if (p->mode != RM_MODE_RUN && p->irm_range > 1 && rm_plant_irm(p) < RM_IRM_DOWNSCALE)
+        r = "ROD BLOCK: IRM DOWNSCALE - RANGE DOWN";
+    else if (p->mode != RM_MODE_RUN && rm_plant_irm(p) > 108.0) r = "ROD BLOCK: IRM UPSCALE - RANGE UP";
+    if (r && why) snprintf(why, nwhy, "%s", r);
+    return r != NULL;
+}
+
 /* Tube leaks feed water into the secondary sodium. The reaction makes
  * hydrogen (picked up by the hydrogen meter) and heat, and the jet wastes
  * neighbouring tubes, so the leak grows until the SG is isolated. A big leak
@@ -626,6 +674,9 @@ static void protection(rm_plant *p)
         if (p->loop[i].ppump.tripped || !p->loop[i].ppump.motor_on) pumps_off++;
     if (p->rps_bypass || c->scram) return;
     if (!p->offsite_power && pw > 0.05) trip(p, "LOSS OF OFFSITE POWER");
+    else if (p->mode != RM_MODE_RUN && rm_plant_aprm(p) > 15.0) trip(p, "APRM HIGH (SETDOWN 15%)");
+    else if ((p->mode == RM_MODE_STARTUP || p->mode == RM_MODE_REFUEL) && rm_plant_irm(p) > RM_IRM_TRIP)
+        trip(p, "IRM HIGH");
     else if (pw > 1.15) trip(p, "HIGH POWER 115%");
     else if (p->period > 0 && p->period < 10.0 && c->pks.n > 1e-4) trip(p, "SHORT PERIOD 10 S");
     else if (pw > 0.15 && pw / fmax(flow, 0.01) > 1.15) trip(p, "POWER/FLOW 1.15");
@@ -672,6 +723,7 @@ void rm_plant_step(rm_plant *p, double dt)
             if (rising && per < 600.0) step = 0.3;
             else if (falling && per > -600.0) step = -0.3;
         }
+        if (step < 0 && rm_plant_rod_block(p, 0, NULL, 0)) step = 0.0;
         rm_core_bank_move(c, BANK_REG, pos + step);
     }
     electrical(p, dt);
@@ -765,6 +817,8 @@ void rm_plant_hot_standby(rm_plant *p)
     p->T_fw = 423.15;
     p->auto_rod = 0;
     p->power_set = 0.05;
+    p->mode = RM_MODE_SHUTDOWN;
+    p->irm_range = 1;
     p->first_out[0] = 0;
     p->period = INFINITY;
     /* settle the loops (no fission power to speak of) */
