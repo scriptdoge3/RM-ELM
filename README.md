@@ -33,12 +33,18 @@ used. Force C with `-DRMELM_USE_ASM=OFF`.
 
 ![Two primary pumps stopped: the reactor trips](docs/gui_trip.png)
 
-A point-and-click window: reactor panel with a live power/temperature
-trend, a plant diagram (pipes coloured by temperature, click a pump to start
-or stop it), a big SCRAM button, rod bank controls, automatic power control
-with a setpoint, turbine, DRACS and failure buttons, annunciator lights and a
-message log. The buttons along the top set simulation speed (x1 to x16) or
-pause. F12 saves a screenshot.
+A point-and-click main control board drawn in 1978 style. It has green
+painted steel panels, red LED readouts, and needle meters. A strip-chart
+recorder traces reactor power (violet pen) and core outlet temperature (red
+pen). The plant mimic uses coloured tape lines; click a pump symbol to start
+or stop it. The console has a mushroom-head manual scram, lit pushbuttons for
+the rod banks (OUT/IN by 20 or 2 cm), AUTO/MAN regulating rod control with a
+power demand, turbine trip/latch and DRACS dampers. A training sub-panel
+injects faults (grid loss, diesel failures). Along the bottom are the
+annunciator windows (red ones flash) and an alarm typer on green-bar paper.
+Lamps follow the US convention of the period: red = running/closed,
+green = stopped/open. The SIM RATE buttons set speed (X1 to X16), HOLD
+pauses, and F12 saves a screenshot.
 
 The first `cmake` configure downloads raylib 5.5 automatically (or uses one
 already installed). On Linux you need the X11/OpenGL development packages:
