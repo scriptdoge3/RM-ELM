@@ -57,6 +57,9 @@ static long nsamp = 0;
 static char logs[NLOG][100];
 static char last_first_out[48] = "";
 static double last_log_time = -100;
+static int show_rods = 0;               /* centre board: 0 = plant mimic, 1 = rod select */
+static int sel_rod = -1;                /* selected rod (core index) or -1 */
+static int rod_no[128];                 /* rod number shown to the operator, 1..55 in reading order */
 
 static void logmsg(const char *fmt, ...)
 {
@@ -517,6 +520,159 @@ static void draw_mimic(Rectangle r)
     meter((Rectangle){r.x + 20 + 2 * mw, r.y + 362, mw, 110}, "DRACS MW", P->Q_dracs / 1e6, 0, 100, 0, 0, 2);
 }
 
+/* ---- rod select board ------------------------------------------------------ */
+static const Color BANK_C[RM_NBANKS] = {
+    {240, 240, 230, 255}, {250, 200, 60, 255}, {90, 200, 110, 255},
+    {80, 150, 230, 255}, {200, 120, 230, 255}, {230, 60, 50, 255},
+};
+static const char *bank_short[RM_NBANKS] = {"REG", "A", "B", "C", "D", "SAFE"};
+
+/* number the rods 1..N top to bottom, left to right, like a core map */
+static void number_rods(void)
+{
+    rm_core *c = &P->core;
+    rm_hexgrid *g = &c->dif.grid;
+    int ord[128];
+    for (int k = 0; k < c->nctrl; k++) ord[k] = k;
+    for (int i = 1; i < c->nctrl; i++)
+        for (int j = i; j > 0; j--) {
+            int a = c->ctrl_col[ord[j - 1]], b = c->ctrl_col[ord[j]];
+            double xa = g->q[a] + 0.5 * g->r[a], xb = g->q[b] + 0.5 * g->r[b];
+            if (g->r[a] < g->r[b] || (g->r[a] == g->r[b] && xa <= xb)) break;
+            int t = ord[j];
+            ord[j] = ord[j - 1];
+            ord[j - 1] = t;
+        }
+    for (int i = 0; i < c->nctrl; i++) rod_no[ord[i]] = i + 1;
+}
+
+static int rod_blocked(int k, int log)
+{
+    rm_core *c = &P->core;
+    if (c->scram) {
+        if (log) logmsg("ROD MOTION BLOCKED: REACTOR TRIPPED");
+        return 1;
+    }
+    if (c->ctrl_bank[k] == BANK_REG && P->auto_rod) {
+        if (log) logmsg("ROD %d IS IN REG BANK - SELECT MAN FIRST", rod_no[k]);
+        return 1;
+    }
+    return 0;
+}
+
+/* channel power lamp: dark at zero, amber at the mean rated channel power, red above */
+static Color power_color(double rel)
+{
+    Color a, b;
+    double f;
+    if (rel < 1.0) { a = (Color){40, 30, 20, 255}; b = (Color){236, 168, 50, 255}; f = rel; }
+    else { a = (Color){236, 168, 50, 255}; b = (Color){255, 60, 36, 255}; f = (rel - 1.0) / 1.0; }
+    if (f < 0) f = 0;
+    if (f > 1) f = 1;
+    return (Color){(unsigned char)(a.r + (b.r - a.r) * f), (unsigned char)(a.g + (b.g - a.g) * f),
+                   (unsigned char)(a.b + (b.b - a.b) * f), 255};
+}
+
+static void draw_rodselect(Rectangle r)
+{
+    rm_core *c = &P->core;
+    rm_hexgrid *g = &c->dif.grid;
+    steel(r, "ROD SELECT - POSITION INDICATION");
+    Rectangle b = {r.x + 8, r.y + 30, r.width - 16, 330};
+    DrawRectangleRec(b, (Color){34, 38, 36, 255});
+    DrawRectangleLinesEx(b, 2, BEZEL);
+    Vector2 o = {b.x + b.width / 2, b.y + b.height / 2};
+    const float sc = 0.92f;                        /* px per cm */
+    float hexr = RM_PITCH * sc / sqrtf(3.0f);
+    Vector2 m = GetMousePosition();
+    int blink = ((int)(GetTime() * 3)) & 1;
+
+    /* core map: every fuel channel is a lamp lit by its power */
+    double pch_rated = RM_P_RATED / c->nchan;
+    for (int col = 0; col < g->n; col++) {
+        if (g->ring[col] > RM_CORE_RINGS + 1) continue;
+        double x, y;
+        rm_hexgrid_xy(g, col, RM_PITCH * sc, &x, &y);
+        Vector2 p = {o.x + (float)x, o.y + (float)y};
+        if (c->coltype[col] == COL_REFL) {
+            DrawPoly(p, 6, hexr - 1, 30, (Color){62, 70, 66, 255});
+        } else if (c->coltype[col] == COL_FUEL) {
+            int ch = c->chan_of_col[col];
+            double pw = 0;
+            for (int k = 0; k < RM_NZ_ACT; k++) pw += c->th.q_node[core_fnode(c, ch, k)];
+            DrawPoly(p, 6, hexr - 1, 30, power_color(pw / pch_rated));
+        }
+    }
+
+    /* one position dial per rod: needle at 12 o'clock = fully out, clockwise = in */
+    int hover = -1;
+    for (int k = 0; k < c->nctrl; k++) {
+        double x, y;
+        rm_hexgrid_xy(g, c->ctrl_col[k], RM_PITCH * sc, &x, &y);
+        Vector2 p = {o.x + (float)x, o.y + (float)y};
+        if (k == sel_rod) DrawCircleV(p, 17, alpha(L_WHT, blink ? 170 : 90));
+        DrawCircleV(p, 12.5f, BANK_C[c->ctrl_bank[k]]);
+        DrawCircleV(p, 10, (Color){232, 226, 206, 255});
+        DrawLineEx((Vector2){p.x, p.y - 10}, (Vector2){p.x, p.y - 7}, 1.5f, INK);
+        float a = (float)((-90.0 + 330.0 * c->rod_ins[k] / RM_ACTIVE_H) * DEG2RAD);
+        DrawLineEx(p, (Vector2){p.x + 8.5f * cosf(a), p.y + 8.5f * sinf(a)}, 2, (Color){16, 16, 16, 255});
+        DrawCircleV(p, 2, (Color){16, 16, 16, 255});
+        if (fabs(c->rod_vel[k]) > 0 && !c->scram) DrawCircleV((Vector2){p.x + 9, p.y + 9}, 3, L_AMB);
+        if (CheckCollisionPointCircle(m, p, 12.5f)) {
+            hover = k;
+            if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) sel_rod = sel_rod == k ? -1 : k;
+        }
+    }
+
+    /* legend */
+    float y = r.y + 366;
+    for (int bk = 0; bk < RM_NBANKS; bk++) {
+        float x = r.x + 14 + bk * 64;
+        DrawCircleV((Vector2){x + 5, y + 6}, 5, BANK_C[bk]);
+        DrawCircleLinesV((Vector2){x + 5, y + 6}, 5, INK);
+        text(bank_name[bk], x + 14, y + 1, 10, INK);
+    }
+
+    /* selected rod */
+    y = r.y + 386;
+    int s = sel_rod;
+    dymo(r.x + 10, y, "ROD NO");
+    if (s >= 0) readout(r.x + 10, y + 16, 22, 2, "%2d", rod_no[s]);
+    else readout(r.x + 10, y + 16, 22, 2, "--");
+    dymo(r.x + 64, y, "BANK");
+    if (s >= 0) {
+        DrawRectangleRec((Rectangle){r.x + 64, y + 18, 66, 26}, BEZEL);
+        DrawRectangleRec((Rectangle){r.x + 67, y + 21, 60, 20}, BANK_C[c->ctrl_bank[s]]);
+        ctext(bank_short[c->ctrl_bank[s]], r.x + 97, y + 26, 10, INK);
+    }
+    dymo(r.x + 140, y, "CM IN");
+    if (s >= 0) readout(r.x + 140, y + 16, 22, 3, "%3.0f", c->rod_ins[s]);
+    else readout(r.x + 140, y + 16, 22, 3, "---");
+    const char *lab[4] = {"OUT\n20", "OUT\n2", "IN\n2", "IN\n20"};
+    const double step[4] = {-20, -2, 2, 20};
+    for (int k = 0; k < 4; k++) {
+        Rectangle br = {r.x + 206 + k * 54, y + 12, 50, 36};
+        int pressing = s >= 0 && CheckCollisionPointRec(m, br) && IsMouseButtonDown(MOUSE_BUTTON_LEFT);
+        if (lampbutton(br, lab[k], L_WHT, pressing) && s >= 0 && !rod_blocked(s, 1))
+            rm_core_rod_move(c, s, c->rod_target[s] + step[k]);
+    }
+    text("CLICK A DIAL TO SELECT A ROD.  DIAL: 12 O'CLOCK = OUT, CLOCKWISE = IN", r.x + 10, r.y + 446, 10, INK);
+    text("CORE MAP LAMPS = CHANNEL POWER: DARK LOW, AMBER RATED, RED HIGH", r.x + 10, r.y + 460, 10, INK);
+
+    if (hover >= 0) {
+        double x, y2;
+        rm_hexgrid_xy(g, c->ctrl_col[hover], RM_PITCH * sc, &x, &y2);
+        char tip[48];
+        snprintf(tip, sizeof tip, "ROD %d  %s  %.0f CM IN", rod_no[hover], bank_name[c->ctrl_bank[hover]], c->rod_ins[hover]);
+        float tw = (float)MeasureText(tip, 10) + 10;
+        float tx = fminf(o.x + (float)x + 14, b.x + b.width - tw - 4), ty = o.y + (float)y2 - 30;
+        if (ty < b.y + 4) ty = o.y + (float)y2 + 16;
+        DrawRectangleRec((Rectangle){tx, ty, tw, 16}, (Color){244, 238, 214, 255});
+        DrawRectangleLinesEx((Rectangle){tx, ty, tw, 16}, 1, BEZEL);
+        text(tip, tx + 5, ty + 3, 10, INK);
+    }
+}
+
 static void draw_controls(Rectangle r)
 {
     rm_core *c = &P->core;
@@ -574,13 +730,7 @@ static void draw_controls(Rectangle r)
         for (int k = 0; k < 4; k++) {
             Rectangle br = {r.x + 176 + k * 53, y, 48, 28};
             int pressing = !blocked && CheckCollisionPointRec(m, br) && IsMouseButtonDown(MOUSE_BUTTON_LEFT);
-            if (lampbutton(br, lab[k], L_WHT, pressing) && !blocked) {
-                double tgt = 0;
-                int nk = 0;
-                for (int i = 0; i < c->nctrl; i++)
-                    if (c->ctrl_bank[i] == bk) { tgt += c->rod_target[i]; nk++; }
-                rm_core_bank_move(c, bk, tgt / nk + step[k]);
-            }
+            if (lampbutton(br, lab[k], L_WHT, pressing) && !blocked) rm_core_bank_shift(c, bk, step[k]);
         }
         y += 34;
     }
@@ -746,6 +896,8 @@ static void header(void)
         }
     }
     if (lampbutton((Rectangle){870, 6, 60, 34}, "HOLD", L_AMB, paused)) paused = !paused;
+    if (lampbutton((Rectangle){960, 6, 80, 34}, "PLANT\nMIMIC", L_WHT, !show_rods)) show_rods = 0;
+    if (lampbutton((Rectangle){1044, 6, 80, 34}, "ROD\nSELECT", L_WHT, show_rods)) show_rods = 1;
     dymo(1180, 16, "F12 = PHOTO");
 }
 
@@ -780,6 +932,7 @@ int main(void)
             loading_screen();
             if (loaded) {
                 pthread_join(th, NULL);
+                number_rods();
                 logmsg("Unit at rated power, turbine on line");
                 logmsg("Click pumps on the mimic; rod controls at right");
             }
@@ -814,7 +967,9 @@ int main(void)
         ClearBackground(WALL);
         header();
         draw_reactor((Rectangle){6, 46, 420, 480});
-        draw_mimic((Rectangle){432, 46, 440, 480});
+        if (IsKeyPressed(KEY_TAB)) show_rods = !show_rods;
+        if (show_rods) draw_rodselect((Rectangle){432, 46, 440, 480});
+        else draw_mimic((Rectangle){432, 46, 440, 480});
         draw_controls((Rectangle){878, 46, 396, 748});
         draw_annunciators((Rectangle){6, 532, 866, 124});
         draw_log((Rectangle){6, 662, 866, 132});

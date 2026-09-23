@@ -46,6 +46,19 @@ Lamps follow the US convention of the period: red = running/closed,
 green = stopped/open. The SIM RATE buttons set speed (X1 to X16), HOLD
 pauses, and F12 saves a screenshot.
 
+![Rod select board: rod 28 pulled out on its own](docs/gui_rods.png)
+
+The ROD SELECT button (or TAB) swaps the plant mimic for the rod select
+board. It is a core map of all 55 control rods, each with a round position
+dial: the needle at 12 o'clock means fully out, and it turns clockwise as
+the rod goes in. The ring colour shows the rod's bank. Behind the dials,
+every fuel channel is a lamp lit by its power (dark = low, amber = rated,
+red = high), so you can see the power tilt when you move one rod. Click a
+dial to select that rod, then drive it alone with OUT/IN. Hover over a dial
+to see its number, bank and depth. The bank buttons on the console move a
+whole bank and keep each rod's offset. REG bank rods can only be moved by
+hand after you select MAN.
+
 The first `cmake` configure downloads raylib 5.5 automatically (or uses one
 already installed). On Linux you need the X11/OpenGL development packages:
 `sudo apt install libgl-dev libx11-dev libxrandr-dev libxinerama-dev

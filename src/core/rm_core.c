@@ -438,6 +438,20 @@ void rm_core_bank_move(rm_core *c, int bank, double target)
         if (c->ctrl_bank[k] == bank) c->rod_target[k] = target;
 }
 
+void rm_core_bank_shift(rm_core *c, int bank, double d)
+{
+    for (int k = 0; k < c->nctrl; k++)
+        if (c->ctrl_bank[k] == bank) rm_core_rod_move(c, k, c->rod_target[k] + d);
+}
+
+void rm_core_rod_move(rm_core *c, int rod, double target)
+{
+    if (rod < 0 || rod >= c->nctrl) return;
+    if (target < 0) target = 0;
+    if (target > RM_ACTIVE_H) target = RM_ACTIVE_H;
+    c->rod_target[rod] = target;
+}
+
 double rm_core_bank_pos(const rm_core *c, int bank)
 {
     double s = 0;

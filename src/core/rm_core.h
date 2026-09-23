@@ -104,6 +104,10 @@ void rm_core_step(rm_core *c, double dt);
 
 /* Rod control helpers */
 void rm_core_bank_move(rm_core *c, int bank, double target_cm);
+/* shift every rod of a bank by d cm, keeping individual offsets */
+void rm_core_bank_shift(rm_core *c, int bank, double d_cm);
+/* drive a single rod */
+void rm_core_rod_move(rm_core *c, int rod, double target_cm);
 double rm_core_bank_pos(const rm_core *c, int bank);
 void rm_core_scram(rm_core *c);
 void rm_core_reset_scram(rm_core *c);
